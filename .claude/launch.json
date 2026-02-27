@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fetch-data",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["main.py"],
+      "port": 0
+    },
+    {
+      "name": "query",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["query.py"],
+      "port": 0
+    }
+  ]
+}
