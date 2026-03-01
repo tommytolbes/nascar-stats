@@ -217,10 +217,10 @@ def track_tabs(track_histories):
         active = "active" if i == 0 else ""
         short  = tname.split()[0]  # first word of track name
         tab_btns.append(
-            f'<button class="tab {active}" onclick="showTab(\'track\',{i})" data-group="track">{short}</button>'
+            f'<button class="tab track-tab {active}" onclick="showTrackTab({i})">{short}</button>'
         )
         tab_panels.append(
-            f'<div class="tab-panel {active}" data-group="track">'
+            f'<div class="tab-panel track-panel {active}">'
             f'<p class="track-label">{tname}</p>'
             f'{table_html(rows, cols)}</div>'
         )
@@ -397,8 +397,11 @@ def build_html(cfg, optimizer, recent_form, track_histories, overall_value):
 </footer>
 
 <script>
-  function showTab(group, idx) {{
-    document.querySelectorAll('[data-group="' + group + '"]').forEach(function(el, i) {{
+  function showTrackTab(idx) {{
+    document.querySelectorAll('.track-tab').forEach(function(el, i) {{
+      el.classList.toggle('active', i === idx);
+    }});
+    document.querySelectorAll('.track-panel').forEach(function(el, i) {{
       el.classList.toggle('active', i === idx);
     }});
   }}
