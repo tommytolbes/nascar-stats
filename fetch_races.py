@@ -10,17 +10,18 @@ Run this AFTER main.py has already built nascar.db.
 
 Usage:   python fetch_races.py
 
-Covers seasons 2020-2025.
+Covers seasons 2020 through the current calendar year.
 """
 
 import requests
 import sqlite3
 import time
 import re
+import datetime
 
 DB_FILE    = "nascar.db"
 START_YEAR = 2020
-END_YEAR   = 2025
+END_YEAR   = datetime.date.today().year
 PAUSE      = 0.25   # seconds between API calls
 
 BASE       = "http://sports.core.api.espn.com/v2/sports/racing/leagues/nascar-premier"
