@@ -4,12 +4,38 @@ NASCAR Database Explorer
 Run this after main.py to explore the data you've collected.
 
 Usage:   python query.py
+
+The active segment is controlled by segment.json.
+Run 'python load_segment.py' at the start of each new segment.
 """
 
 import sqlite3
 import itertools
+import json
+import os
 
-DB_FILE = "nascar.db"
+DB_FILE     = "nascar.db"
+CONFIG_FILE = "segment.json"
+
+
+def load_config():
+    """Load the active segment config from segment.json."""
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE) as f:
+            return json.load(f)
+    # Fallback if segment.json is missing
+    return {
+        "year":        2026,
+        "segment":     1,
+        "track_ids":   [1, 18, 253, 16],
+        "track_names": [
+            "Daytona International Speedway",
+            "Atlanta Motor Speedway",
+            "Circuit of the Americas",
+            "Phoenix International Raceway",
+        ],
+    }
+
 
 def run(conn, label, sql, params=()):
     print(f"\n{'-'*55}")
@@ -21,24 +47,38 @@ def run(conn, label, sql, params=()):
     if not rows:
         print("  (no results)")
         return
-    # Column widths
     widths = [max(len(str(c)), max(len(str(r[i])) for r in rows)) for i, c in enumerate(cols)]
     header = "  " + "  ".join(str(c).ljust(w) for c, w in zip(cols, widths))
     print(header)
-    print("  " + "  ".join("-" * w for w in widths))  # noqa: separator line
+    print("  " + "  ".join("-" * w for w in widths))
     for row in rows:
         print("  " + "  ".join(str(v).ljust(w) for v, w in zip(row, widths)))
 
+
 def main():
     conn = sqlite3.connect(DB_FILE)
+    cfg  = load_config()
+    yr   = cfg["year"]
+    seg  = cfg["segment"]
+    tids = cfg["track_ids"]
+    tnames = cfg["track_names"]
 
-    # 1. How many drivers and seasons do we have?
+    print(f"\n{'='*55}")
+    print(f"  Active: {yr} Segment {seg}")
+    print(f"  Tracks: {', '.join(tnames)}")
+    print(f"{'='*55}")
+
+    # ── Historical Queries ──────────────────────────────────────────────────────
+
+    # 1. Database summary
     run(conn, "Database Summary",
         """
         SELECT
-            (SELECT COUNT(*) FROM drivers)          AS total_drivers,
+            (SELECT COUNT(*) FROM drivers)                   AS total_drivers,
             (SELECT COUNT(DISTINCT year) FROM season_standings) AS total_seasons,
-            (SELECT COUNT(*) FROM season_standings) AS total_records
+            (SELECT COUNT(*) FROM season_standings)          AS total_records,
+            (SELECT COUNT(*) FROM races)                     AS total_races,
+            (SELECT COUNT(*) FROM race_results)              AS total_results
         """)
 
     # 2. Most wins in a single season (top 15)
@@ -99,166 +139,94 @@ def main():
 
     # ── Fantasy NASCAR Queries ──────────────────────────────────────────────────
 
-    # 7. 2026 Segment 1 driver salaries
-    run(conn, "2026 Segment 1 - Driver Salaries",
+    # 7. Driver salaries for the active segment
+    run(conn, f"{yr} Segment {seg} - Driver Salaries",
         """
         SELECT d.display_name, ds.salary
         FROM driver_salaries ds
         JOIN drivers d ON d.id = ds.driver_id
-        WHERE ds.year = 2026 AND ds.segment = 1
+        WHERE ds.year = ? AND ds.segment = ?
         ORDER BY ds.salary DESC
-        """)
+        """, (yr, seg))
 
-    # 8. Recent form - avg fantasy pts per driver over last 8 races of 2025
-    run(conn, "Recent Form - Avg Fantasy Pts (Last 8 Races of 2025)",
+    # 8. Recent form - avg fantasy pts over the last 8 races
+    run(conn, "Recent Form - Avg Fantasy Pts (Last 8 Races)",
         """
         WITH last8 AS (
             SELECT r.id AS race_id
             FROM races r
-            WHERE r.year = 2025
             ORDER BY r.date DESC
             LIMIT 8
         )
         SELECT
             d.display_name,
             ds.salary,
-            ROUND(AVG(fs.total_pts), 1)        AS avg_fantasy_pts,
-            ROUND(AVG(fs.total_pts) / ds.salary, 2) AS pts_per_dollar,
-            MIN(fs.total_pts)                  AS worst,
-            MAX(fs.total_pts)                  AS best
+            ROUND(AVG(fs.total_pts), 1)              AS avg_fantasy_pts,
+            ROUND(AVG(fs.total_pts) / ds.salary, 2)  AS pts_per_dollar,
+            MIN(fs.total_pts)                        AS worst,
+            MAX(fs.total_pts)                        AS best
         FROM fantasy_scores fs
         JOIN last8 ON last8.race_id = fs.race_id
         JOIN drivers d ON d.id = fs.driver_id
         JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
-            AND ds.year = 2026 AND ds.segment = 1
+            AND ds.year = ? AND ds.segment = ?
         GROUP BY fs.driver_id
         ORDER BY avg_fantasy_pts DESC
-        """)
+        """, (yr, seg))
 
-    # 9. Track history - Daytona (superspeedway)
-    run(conn, "Track History - Daytona International Speedway",
-        """
-        SELECT
-            d.display_name,
-            ds.salary,
-            COUNT(*)                            AS starts,
-            ROUND(AVG(fs.total_pts), 1)         AS avg_fantasy_pts,
-            ROUND(AVG(fs.total_pts)/ds.salary, 2) AS pts_per_dollar,
-            MAX(fs.total_pts)                   AS best_score,
-            ROUND(AVG(rr.finish_pos), 1)        AS avg_finish
-        FROM fantasy_scores fs
-        JOIN race_results rr ON rr.race_id = fs.race_id AND rr.driver_id = fs.driver_id
-        JOIN races r ON r.id = fs.race_id
-        JOIN tracks t ON t.id = r.track_id
-        JOIN drivers d ON d.id = fs.driver_id
-        JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
-            AND ds.year = 2026 AND ds.segment = 1
-        WHERE t.id = 1
-        GROUP BY fs.driver_id
-        HAVING starts >= 1
-        ORDER BY avg_fantasy_pts DESC
-        """)
+    # 9-12. Per-track history for each track in the active segment
+    for tid, tname in zip(tids, tnames):
+        run(conn, f"Track History - {tname}",
+            """
+            SELECT
+                d.display_name,
+                ds.salary,
+                COUNT(*)                              AS starts,
+                ROUND(AVG(fs.total_pts), 1)           AS avg_fantasy_pts,
+                ROUND(AVG(fs.total_pts)/ds.salary, 2) AS pts_per_dollar,
+                MAX(fs.total_pts)                     AS best_score,
+                ROUND(AVG(rr.finish_pos), 1)          AS avg_finish
+            FROM fantasy_scores fs
+            JOIN race_results rr ON rr.race_id = fs.race_id AND rr.driver_id = fs.driver_id
+            JOIN races r ON r.id = fs.race_id
+            JOIN tracks t ON t.id = r.track_id
+            JOIN drivers d ON d.id = fs.driver_id
+            JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
+                AND ds.year = ? AND ds.segment = ?
+            WHERE t.id = ?
+            GROUP BY fs.driver_id
+            HAVING starts >= 1
+            ORDER BY avg_fantasy_pts DESC
+            """, (yr, seg, tid))
 
-    # 10. Track history - Atlanta
-    run(conn, "Track History - Atlanta Motor Speedway",
-        """
-        SELECT
-            d.display_name,
-            ds.salary,
-            COUNT(*)                            AS starts,
-            ROUND(AVG(fs.total_pts), 1)         AS avg_fantasy_pts,
-            ROUND(AVG(fs.total_pts)/ds.salary, 2) AS pts_per_dollar,
-            MAX(fs.total_pts)                   AS best_score,
-            ROUND(AVG(rr.finish_pos), 1)        AS avg_finish
-        FROM fantasy_scores fs
-        JOIN race_results rr ON rr.race_id = fs.race_id AND rr.driver_id = fs.driver_id
-        JOIN races r ON r.id = fs.race_id
-        JOIN tracks t ON t.id = r.track_id
-        JOIN drivers d ON d.id = fs.driver_id
-        JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
-            AND ds.year = 2026 AND ds.segment = 1
-        WHERE t.id = 18
-        GROUP BY fs.driver_id
-        HAVING starts >= 1
-        ORDER BY avg_fantasy_pts DESC
-        """)
-
-    # 11. Track history - COTA (road course)
-    run(conn, "Track History - Circuit of the Americas",
-        """
-        SELECT
-            d.display_name,
-            ds.salary,
-            COUNT(*)                            AS starts,
-            ROUND(AVG(fs.total_pts), 1)         AS avg_fantasy_pts,
-            ROUND(AVG(fs.total_pts)/ds.salary, 2) AS pts_per_dollar,
-            MAX(fs.total_pts)                   AS best_score,
-            ROUND(AVG(rr.finish_pos), 1)        AS avg_finish
-        FROM fantasy_scores fs
-        JOIN race_results rr ON rr.race_id = fs.race_id AND rr.driver_id = fs.driver_id
-        JOIN races r ON r.id = fs.race_id
-        JOIN tracks t ON t.id = r.track_id
-        JOIN drivers d ON d.id = fs.driver_id
-        JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
-            AND ds.year = 2026 AND ds.segment = 1
-        WHERE t.id = 253
-        GROUP BY fs.driver_id
-        HAVING starts >= 1
-        ORDER BY avg_fantasy_pts DESC
-        """)
-
-    # 12. Track history - Phoenix
-    run(conn, "Track History - Phoenix International Raceway",
-        """
-        SELECT
-            d.display_name,
-            ds.salary,
-            COUNT(*)                            AS starts,
-            ROUND(AVG(fs.total_pts), 1)         AS avg_fantasy_pts,
-            ROUND(AVG(fs.total_pts)/ds.salary, 2) AS pts_per_dollar,
-            MAX(fs.total_pts)                   AS best_score,
-            ROUND(AVG(rr.finish_pos), 1)        AS avg_finish
-        FROM fantasy_scores fs
-        JOIN race_results rr ON rr.race_id = fs.race_id AND rr.driver_id = fs.driver_id
-        JOIN races r ON r.id = fs.race_id
-        JOIN tracks t ON t.id = r.track_id
-        JOIN drivers d ON d.id = fs.driver_id
-        JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
-            AND ds.year = 2026 AND ds.segment = 1
-        WHERE t.id = 16
-        GROUP BY fs.driver_id
-        HAVING starts >= 1
-        ORDER BY avg_fantasy_pts DESC
-        """)
-
-    # 13. Overall segment 1 value score (avg across all 4 Segment 1 tracks)
-    # Track IDs: 1=Daytona, 18=Atlanta, 253=COTA, 16=Phoenix
-    run(conn, "Segment 1 - Best Overall Value (All 4 Tracks Combined)",
-        """
+    # 13. Overall value across all segment tracks combined
+    placeholders = ",".join("?" * len(tids))
+    run(conn, f"Segment {seg} - Best Overall Value (All Tracks Combined)",
+        f"""
         WITH seg_tracks AS (
             SELECT r.id AS race_id
             FROM races r
             JOIN tracks t ON t.id = r.track_id
-            WHERE t.id IN (1, 18, 253, 16)
+            WHERE t.id IN ({placeholders})
         )
         SELECT
             d.display_name,
             ds.salary,
-            COUNT(*)                                 AS historical_starts,
-            ROUND(AVG(fs.total_pts), 1)              AS avg_fantasy_pts,
-            ROUND(AVG(fs.total_pts) / ds.salary, 2)  AS pts_per_dollar
+            COUNT(*)                                  AS historical_starts,
+            ROUND(AVG(fs.total_pts), 1)               AS avg_fantasy_pts,
+            ROUND(AVG(fs.total_pts) / ds.salary, 2)   AS pts_per_dollar
         FROM fantasy_scores fs
         JOIN seg_tracks ON seg_tracks.race_id = fs.race_id
         JOIN drivers d ON d.id = fs.driver_id
         JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
-            AND ds.year = 2026 AND ds.segment = 1
+            AND ds.year = ? AND ds.segment = ?
         GROUP BY fs.driver_id
         HAVING historical_starts >= 2
         ORDER BY pts_per_dollar DESC
         LIMIT 20
-        """)
+        """, (*tids, yr, seg))
 
-    # 14. Track type specialists - avg fantasy pts by track type (road course, short track, etc.)
+    # 14. Track type specialists - floor, ceiling, avg by track type
     run(conn, "Driver Avg Fantasy Pts by Track Type (min 3 starts per type)",
         """
         SELECT
@@ -273,39 +241,36 @@ def main():
         JOIN tracks t ON t.id = r.track_id
         JOIN drivers d ON d.id = fs.driver_id
         JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
-            AND ds.year = 2026 AND ds.segment = 1
+            AND ds.year = ? AND ds.segment = ?
         GROUP BY fs.driver_id, t.track_type
         HAVING starts >= 3
         ORDER BY t.track_type, avg_fantasy_pts DESC
-        """)
+        """, (yr, seg))
 
-    # 14. Team optimizer - best 4-driver combo under $100
-    fantasy_optimizer(conn)
+    # 15. Team optimizer
+    fantasy_optimizer(conn, yr, seg, tids)
 
     conn.close()
     print(f"\n{'-'*55}")
     print("  Tip: open nascar.db with 'DB Browser for SQLite'")
-    print("  (free download at sqlitebrowser.org) to browse visually.")
+    print("  (free at sqlitebrowser.org) to browse data visually.")
+    print(f"  To load a new segment: python load_segment.py")
     print(f"{'-'*55}\n")
 
 
-def fantasy_optimizer(conn):
-    """
-    Finds the top 5 four-driver combinations under $100
-    ranked by combined average fantasy points across Segment 1 track types.
-    """
+def fantasy_optimizer(conn, yr, seg, tids):
+    """Find the top 5 four-driver combos under $100 for the active segment."""
     print(f"\n{'-'*55}")
-    print("  Team Optimizer - Best 4-Driver Combos Under $100")
+    print(f"  Team Optimizer - Best 4-Driver Combos Under $100")
     print(f"{'-'*55}")
 
-    # Pull drivers with salary + avg pts across Segment 1 tracks
-    # Track IDs: 1=Daytona, 18=Atlanta, 253=COTA, 16=Phoenix
-    rows = conn.execute("""
+    placeholders = ",".join("?" * len(tids))
+    rows = conn.execute(f"""
         WITH seg_tracks AS (
             SELECT r.id AS race_id
             FROM races r
             JOIN tracks t ON t.id = r.track_id
-            WHERE t.id IN (1, 18, 253, 16)
+            WHERE t.id IN ({placeholders})
         )
         SELECT
             d.display_name,
@@ -315,17 +280,16 @@ def fantasy_optimizer(conn):
         JOIN seg_tracks ON seg_tracks.race_id = fs.race_id
         JOIN drivers d ON d.id = fs.driver_id
         JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
-            AND ds.year = 2026 AND ds.segment = 1
+            AND ds.year = ? AND ds.segment = ?
         GROUP BY fs.driver_id
         HAVING COUNT(*) >= 2
         ORDER BY avg_pts DESC
-    """).fetchall()
+    """, (*tids, yr, seg)).fetchall()
 
     if not rows:
         print("  (no data available)")
         return
 
-    # Evaluate all 4-driver combos
     best = []
     for combo in itertools.combinations(rows, 4):
         total_salary = sum(c[1] for c in combo)
