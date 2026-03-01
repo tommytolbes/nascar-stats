@@ -136,7 +136,7 @@ def main():
         """)
 
     # 9. Track history - Daytona (superspeedway)
-    run(conn, "Track History - Daytona (2020-2025)",
+    run(conn, "Track History - Daytona International Speedway",
         """
         SELECT
             d.display_name,
@@ -153,14 +153,14 @@ def main():
         JOIN drivers d ON d.id = fs.driver_id
         JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
             AND ds.year = 2026 AND ds.segment = 1
-        WHERE t.full_name LIKE '%Daytona%'
+        WHERE t.id = 1
         GROUP BY fs.driver_id
         HAVING starts >= 1
         ORDER BY avg_fantasy_pts DESC
         """)
 
     # 10. Track history - Atlanta
-    run(conn, "Track History - Atlanta (2020-2025)",
+    run(conn, "Track History - Atlanta Motor Speedway",
         """
         SELECT
             d.display_name,
@@ -177,14 +177,14 @@ def main():
         JOIN drivers d ON d.id = fs.driver_id
         JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
             AND ds.year = 2026 AND ds.segment = 1
-        WHERE t.full_name LIKE '%Atlanta%'
+        WHERE t.id = 18
         GROUP BY fs.driver_id
         HAVING starts >= 1
         ORDER BY avg_fantasy_pts DESC
         """)
 
     # 11. Track history - COTA (road course)
-    run(conn, "Track History - COTA (2020-2025)",
+    run(conn, "Track History - Circuit of the Americas",
         """
         SELECT
             d.display_name,
@@ -201,14 +201,14 @@ def main():
         JOIN drivers d ON d.id = fs.driver_id
         JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
             AND ds.year = 2026 AND ds.segment = 1
-        WHERE t.full_name LIKE '%Texas%' OR t.full_name LIKE '%Circuit of%'
+        WHERE t.id = 253
         GROUP BY fs.driver_id
         HAVING starts >= 1
         ORDER BY avg_fantasy_pts DESC
         """)
 
     # 12. Track history - Phoenix
-    run(conn, "Track History - Phoenix (2020-2025)",
+    run(conn, "Track History - Phoenix International Raceway",
         """
         SELECT
             d.display_name,
@@ -225,26 +225,21 @@ def main():
         JOIN drivers d ON d.id = fs.driver_id
         JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
             AND ds.year = 2026 AND ds.segment = 1
-        WHERE t.full_name LIKE '%Phoenix%'
+        WHERE t.id = 16
         GROUP BY fs.driver_id
         HAVING starts >= 1
         ORDER BY avg_fantasy_pts DESC
         """)
 
-    # 13. Overall segment 1 value score (avg across all 4 track types)
+    # 13. Overall segment 1 value score (avg across all 4 Segment 1 tracks)
+    # Track IDs: 1=Daytona, 18=Atlanta, 253=COTA, 16=Phoenix
     run(conn, "Segment 1 - Best Overall Value (All 4 Tracks Combined)",
         """
         WITH seg_tracks AS (
             SELECT r.id AS race_id
             FROM races r
             JOIN tracks t ON t.id = r.track_id
-            WHERE (
-                t.full_name LIKE '%Daytona%' OR
-                t.full_name LIKE '%Atlanta%' OR
-                t.full_name LIKE '%Texas%'   OR
-                t.full_name LIKE '%Circuit of%' OR
-                t.full_name LIKE '%Phoenix%'
-            )
+            WHERE t.id IN (1, 18, 253, 16)
         )
         SELECT
             d.display_name,
@@ -261,6 +256,27 @@ def main():
         HAVING historical_starts >= 2
         ORDER BY pts_per_dollar DESC
         LIMIT 20
+        """)
+
+    # 14. Track type specialists - avg fantasy pts by track type (road course, short track, etc.)
+    run(conn, "Driver Avg Fantasy Pts by Track Type (min 3 starts per type)",
+        """
+        SELECT
+            d.display_name,
+            t.track_type,
+            COUNT(*)                            AS starts,
+            ROUND(AVG(fs.total_pts), 1)         AS avg_fantasy_pts,
+            MIN(fs.total_pts)                   AS floor,
+            MAX(fs.total_pts)                   AS ceiling
+        FROM fantasy_scores fs
+        JOIN races r ON r.id = fs.race_id
+        JOIN tracks t ON t.id = r.track_id
+        JOIN drivers d ON d.id = fs.driver_id
+        JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
+            AND ds.year = 2026 AND ds.segment = 1
+        GROUP BY fs.driver_id, t.track_type
+        HAVING starts >= 3
+        ORDER BY t.track_type, avg_fantasy_pts DESC
         """)
 
     # 14. Team optimizer - best 4-driver combo under $100
@@ -282,19 +298,14 @@ def fantasy_optimizer(conn):
     print("  Team Optimizer - Best 4-Driver Combos Under $100")
     print(f"{'-'*55}")
 
-    # Pull drivers with salary + avg pts across segment 1 track types
+    # Pull drivers with salary + avg pts across Segment 1 tracks
+    # Track IDs: 1=Daytona, 18=Atlanta, 253=COTA, 16=Phoenix
     rows = conn.execute("""
         WITH seg_tracks AS (
             SELECT r.id AS race_id
             FROM races r
             JOIN tracks t ON t.id = r.track_id
-            WHERE (
-                t.full_name LIKE '%Daytona%' OR
-                t.full_name LIKE '%Atlanta%' OR
-                t.full_name LIKE '%Texas%'   OR
-                t.full_name LIKE '%Circuit of%' OR
-                t.full_name LIKE '%Phoenix%'
-            )
+            WHERE t.id IN (1, 18, 253, 16)
         )
         SELECT
             d.display_name,
