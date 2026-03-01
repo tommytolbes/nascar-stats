@@ -149,12 +149,13 @@ def main():
         ORDER BY ds.salary DESC
         """, (yr, seg))
 
-    # 8. Recent form - avg fantasy pts over the last 8 races
-    run(conn, "Recent Form - Avg Fantasy Pts (Last 8 Races)",
+    # 8. Recent form - avg fantasy pts over the last 8 completed races
+    run(conn, "Recent Form - Avg Fantasy Pts (Last 8 Completed Races)",
         """
         WITH last8 AS (
             SELECT r.id AS race_id
             FROM races r
+            WHERE EXISTS (SELECT 1 FROM race_results rr WHERE rr.race_id = r.id)
             ORDER BY r.date DESC
             LIMIT 8
         )
