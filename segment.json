@@ -1,0 +1,11 @@
+{
+  "year": 2026,
+  "segment": 1,
+  "track_ids": [1, 18, 253, 16],
+  "track_names": [
+    "Daytona International Speedway",
+    "Atlanta Motor Speedway",
+    "Circuit of the Americas",
+    "Phoenix International Raceway"
+  ]
+}
