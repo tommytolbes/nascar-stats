@@ -119,26 +119,54 @@ def get_track_histories(conn, cfg):
     return result
 
 
-def get_overall_value(conn, cfg):
-    yr, seg, tids = cfg["year"], cfg["segment"], cfg["track_ids"]
-    ph = ",".join("?" * len(tids))
-    return q(conn, f"""
-        WITH seg AS (
-            SELECT r.id AS race_id FROM races r
-            JOIN tracks t ON t.id = r.track_id WHERE t.id IN ({ph})
-        )
-        SELECT d.display_name AS driver, ds.salary,
-               COUNT(*) AS starts,
-               ROUND(AVG(fs.total_pts), 1)             AS avg_pts,
-               ROUND(AVG(fs.total_pts) / ds.salary, 2) AS pts_per_dollar
-        FROM fantasy_scores fs
-        JOIN seg ON seg.race_id = fs.race_id
-        JOIN drivers d ON d.id = fs.driver_id
-        JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
-            AND ds.year = ? AND ds.segment = ?
-        GROUP BY fs.driver_id HAVING starts >= 2
-        ORDER BY pts_per_dollar DESC LIMIT 20
-    """, (*tids, yr, seg))
+def get_race_results(conn, cfg):
+    """
+    For each segment track, return the actual race results from the most
+    recent completed race at that track in the current year.
+    Includes salary, qualifying position, historical avg finish (prior years),
+    and how many spots better/worse the driver ran vs that historical avg.
+    """
+    yr, seg = cfg["year"], cfg["segment"]
+    result = {}
+    for tid, tname in zip(cfg["track_ids"], cfg["track_names"]):
+        # Find the most recent race at this track this year that has results
+        latest = conn.execute("""
+            SELECT id FROM races
+            WHERE track_id = ? AND year = ?
+              AND EXISTS (SELECT 1 FROM race_results rr WHERE rr.race_id = races.id)
+            ORDER BY date DESC LIMIT 1
+        """, (tid, yr)).fetchone()
+
+        if not latest:
+            result[tname] = []  # race hasn't happened yet
+            continue
+
+        result[tname] = q(conn, """
+            WITH hist AS (
+                SELECT rr.driver_id,
+                       ROUND(AVG(CAST(rr.finish_pos AS REAL)), 1) AS hist_avg
+                FROM race_results rr
+                JOIN races r ON r.id = rr.race_id
+                WHERE r.track_id = ? AND r.year < ?
+                GROUP BY rr.driver_id
+            )
+            SELECT d.display_name            AS driver,
+                   ds.salary,
+                   rr.finish_pos,
+                   rr.start_pos,
+                   h.hist_avg,
+                   CASE WHEN h.hist_avg IS NOT NULL
+                        THEN ROUND(h.hist_avg - rr.finish_pos, 1)
+                        ELSE NULL END        AS plus_minus
+            FROM race_results rr
+            JOIN drivers d ON d.id = rr.driver_id
+            JOIN driver_salaries ds ON ds.driver_id = d.id
+                AND ds.year = ? AND ds.segment = ?
+            LEFT JOIN hist h ON h.driver_id = rr.driver_id
+            WHERE rr.race_id = ?
+            ORDER BY rr.finish_pos
+        """, (tid, yr, yr, seg, latest[0]))
+    return result
 
 
 # ── HTML helpers ───────────────────────────────────────────────────────────────
@@ -176,6 +204,15 @@ def table_html(rows, cols):
             elif key in ("pts_per_dollar", "ppd"):
                 css = ppd_class(val)
                 cell = f'<span class="{css}">{val}</span>'
+            elif key == "plus_minus":
+                if val is None:
+                    cell = "—"
+                elif val > 0:
+                    cell = f'<span class="pm-pos">+{val}</span>'
+                elif val < 0:
+                    cell = f'<span class="pm-neg">{val}</span>'
+                else:
+                    cell = "0"
             html.append(f"<td>{cell}</td>")
         html.append("</tr>")
     html.append("</tbody></table></div>")
@@ -230,9 +267,39 @@ def track_tabs(track_histories):
     )
 
 
+def race_results_tabs(race_results):
+    """Render tabbed actual race results for each segment track."""
+    cols = [
+        ("finish_pos", "Finish"), ("salary", "Salary"),
+        ("start_pos",  "Start"),  ("hist_avg", "Hist Avg"),
+        ("plus_minus", "+/- Avg"),
+    ]
+    tab_btns   = []
+    tab_panels = []
+    for i, (tname, rows) in enumerate(race_results.items()):
+        active = "active" if i == 0 else ""
+        short  = tname.split()[0]
+        tab_btns.append(
+            f'<button class="tab results-tab {active}" onclick="showResultsTab({i})">{short}</button>'
+        )
+        if rows:
+            content = table_html(rows, cols)
+        else:
+            content = '<p class="race-pending">&#9873; Race not yet completed &mdash; check back after race day.</p>'
+        tab_panels.append(
+            f'<div class="tab-panel results-panel {active}">'
+            f'<p class="track-label">{tname}</p>'
+            f'{content}</div>'
+        )
+    return (
+        '<div class="tabs">' + "".join(tab_btns) + "</div>" +
+        "".join(tab_panels)
+    )
+
+
 # ── Main HTML builder ──────────────────────────────────────────────────────────
 
-def build_html(cfg, optimizer, recent_form, track_histories, overall_value):
+def build_html(cfg, optimizer, recent_form, track_histories, race_results):
     yr      = cfg["year"]
     seg     = cfg["segment"]
     tnames  = cfg["track_names"]
@@ -246,11 +313,6 @@ def build_html(cfg, optimizer, recent_form, track_histories, overall_value):
         ("avg_pts", "Avg Pts"), ("pts_per_dollar", "Pts/$"),
         ("floor", "Floor"), ("ceiling", "Ceiling"),
     ]
-    value_cols = [
-        ("driver", "Driver"), ("salary", "Salary"),
-        ("starts", "Starts"), ("avg_pts", "Avg Pts"), ("pts_per_dollar", "Pts/$"),
-    ]
-
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -347,6 +409,11 @@ def build_html(cfg, optimizer, recent_form, track_histories, overall_value):
     .tab-panel.active {{ display: block; }}
     .track-label {{ color: var(--muted); font-size: 0.82rem; margin-bottom: 12px; }}
 
+    /* ── +/- avg coloring ── */
+    .pm-pos  {{ color: #2ecc71; font-weight: 700; }}
+    .pm-neg  {{ color: #e74c3c; }}
+    .race-pending {{ color: var(--muted); font-style: italic; padding: 24px 0; }}
+
     /* ── Footer ── */
     footer {{ text-align: center; color: var(--muted); font-size: 0.78rem; padding: 32px 16px; border-top: 1px solid rgba(255,255,255,0.05); }}
     .muted {{ color: var(--muted); }}
@@ -384,10 +451,15 @@ def build_html(cfg, optimizer, recent_form, track_histories, overall_value):
     {track_tabs(track_histories)}
   </section>
 
-  <!-- ── Overall Value ── -->
+  <!-- ── Race Results ── -->
   <section>
-    <h2>Best Overall Value &mdash; All Segment Tracks Combined</h2>
-    {table_html(overall_value, value_cols)}
+    <h2>&#127937; Race Results &mdash; {yr} Segment {seg}</h2>
+    <p style="color:var(--muted);font-size:0.82rem;margin-bottom:16px;">
+      Finish &amp; start positions from this year&rsquo;s race.
+      Hist Avg = avg finishing position at this track in prior years (lower is better).
+      +/- Avg = spots better (green) or worse (red) than historical average.
+    </p>
+    {race_results_tabs(race_results)}
   </section>
 
 </main>
@@ -402,6 +474,14 @@ def build_html(cfg, optimizer, recent_form, track_histories, overall_value):
       el.classList.toggle('active', i === idx);
     }});
     document.querySelectorAll('.track-panel').forEach(function(el, i) {{
+      el.classList.toggle('active', i === idx);
+    }});
+  }}
+  function showResultsTab(idx) {{
+    document.querySelectorAll('.results-tab').forEach(function(el, i) {{
+      el.classList.toggle('active', i === idx);
+    }});
+    document.querySelectorAll('.results-panel').forEach(function(el, i) {{
       el.classList.toggle('active', i === idx);
     }});
   }}
@@ -423,11 +503,11 @@ def main():
     optimizer       = get_optimizer(conn, cfg)
     recent_form     = get_recent_form(conn, cfg)
     track_histories = get_track_histories(conn, cfg)
-    overall_value   = get_overall_value(conn, cfg)
+    race_results    = get_race_results(conn, cfg)
 
     conn.close()
 
-    html = build_html(cfg, optimizer, recent_form, track_histories, overall_value)
+    html = build_html(cfg, optimizer, recent_form, track_histories, race_results)
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write(html)
