@@ -272,7 +272,7 @@ def race_results_tabs(race_results):
     cols = [
         ("driver",     "Driver"),
         ("finish_pos", "Finish"), ("salary", "Salary"),
-        ("start_pos",  "Start"),  ("hist_avg", "Hist Avg"),
+        ("start_pos",  "Start"),  ("hist_avg", "Pre-'26 Avg"),
         ("plus_minus", "+/- Avg"),
     ]
     tab_btns   = []
@@ -457,8 +457,8 @@ def build_html(cfg, optimizer, recent_form, track_histories, race_results):
     <h2>&#127937; Race Results &mdash; {yr} Segment {seg}</h2>
     <p style="color:var(--muted);font-size:0.82rem;margin-bottom:16px;">
       Finish &amp; start positions from this year&rsquo;s race.
-      Hist Avg = avg finishing position at this track in prior years (lower is better).
-      +/- Avg = spots better (green) or worse (red) than historical average.
+      Pre-&rsquo;26 Avg = avg finishing position at this track in years prior to 2026 (lower is better).
+      +/- Avg = spots better (green) or worse (red) than that prior-year average.
     </p>
     {race_results_tabs(race_results)}
   </section>
