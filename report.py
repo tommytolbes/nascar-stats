@@ -270,6 +270,7 @@ def track_tabs(track_histories):
 def race_results_tabs(race_results):
     """Render tabbed actual race results for each segment track."""
     cols = [
+        ("driver",     "Driver"),
         ("finish_pos", "Finish"), ("salary", "Salary"),
         ("start_pos",  "Start"),  ("hist_avg", "Hist Avg"),
         ("plus_minus", "+/- Avg"),
