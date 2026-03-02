@@ -248,7 +248,7 @@ def fetch_race(conn, event_ref, year, race_num, venue_cache, known_drivers):
                 penalty        = extract_stat(cats, "penaltyPts")
 
         conn.execute("""
-            INSERT OR IGNORE INTO race_results
+            INSERT OR REPLACE INTO race_results
                 (race_id, driver_id, finish_pos, start_pos,
                  laps_completed, laps_led, championship_pts,
                  bonus_pts, penalty_pts, car_number, manufacturer, team)
