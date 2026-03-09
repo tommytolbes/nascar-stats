@@ -213,17 +213,6 @@ def main():
             (driver_id, year, segment, salary)
         )
 
-    # Segments table
-    conn.execute(
-        "DELETE FROM segments WHERE year = ? AND segment = ?",
-        (year, segment)
-    )
-    for tid, tname in track_pairs:
-        conn.execute(
-            "INSERT INTO segments (segment, year, race_name, slug) VALUES (?,?,?,?)",
-            (segment, year, tname, tname.lower().replace(" ", "_"))
-        )
-
     conn.commit()
     conn.close()
 
