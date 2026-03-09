@@ -150,6 +150,65 @@ def pick_tracks(conn):
     return [(tid, name) for tid, name, _ in selected]
 
 
+
+
+# DB setup
+
+def setup_lineup_table(conn):
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS segment_lineups (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            year      INTEGER NOT NULL,
+            segment   INTEGER NOT NULL,
+            driver_1  INTEGER,
+            driver_2  INTEGER,
+            driver_3  INTEGER,
+            driver_4  INTEGER,
+            track_ids TEXT,
+            UNIQUE(year, segment)
+        );
+    """)
+    conn.commit()
+
+
+# Lineup picker
+
+def pick_lineup(matched, segment, year):
+    """Show salary list; user picks their 4 drivers."""
+    drivers = sorted(matched, key=lambda x: (-x[1], x[3]))
+    print()
+    print(f"Pick your 4 drivers for Segment {segment} ({year}):")
+    print(f"  {'#':<4}  {'Driver':<30}  Salary")
+    print(f"  {'--':<4}  {'------':<30}  ------")
+    for i, (did, sal, _, db_name) in enumerate(drivers, 1):
+        print(f"  {i:<4}  {db_name:<30}  ${sal}")
+    print()
+    while True:
+        raw = input("Enter 4 driver numbers (space-separated): ").strip()
+        parts = raw.split()
+        if len(parts) != 4:
+            print("  Please enter exactly 4 numbers.")
+            continue
+        try:
+            indices  = [int(p) - 1 for p in parts]
+            selected = [drivers[i] for i in indices]
+        except (ValueError, IndexError):
+            print("  Invalid selection. Try again.")
+            continue
+        total_sal = sum(s[1] for s in selected)
+        if total_sal > 100:
+            print(f"  Total salary ${total_sal} exceeds the $100 cap. Choose again.")
+            continue
+        print()
+        print("Your lineup:")
+        for did, sal, _, db_name in selected:
+            print(f"  {db_name:<30}  ${sal}")
+        print(f"  Total: ${total_sal}  |  Remaining: ${100 - total_sal}")
+        confirm = input("Look right? (y/n): ").strip().lower()
+        if confirm == "y":
+            return selected
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -158,6 +217,7 @@ def main():
     print("=" * 55)
 
     conn = sqlite3.connect(DB_FILE)
+    setup_lineup_table(conn)
 
     # ── Step 1: Segment info ───────────────────────────────────────────────────
     print()
@@ -200,6 +260,7 @@ def main():
 
     # ── Step 3: Pick tracks ────────────────────────────────────────────────────
     track_pairs = pick_tracks(conn)   # [(id, name), ...]
+    track_ids   = [t[0] for t in track_pairs]
 
     # ── Step 4: Save to database ───────────────────────────────────────────────
     # Salaries
@@ -214,13 +275,24 @@ def main():
         )
 
     conn.commit()
+
+    # ── Step 5: Pick your lineup
+    lineup = pick_lineup(matched, segment, year)
+    d1, d2, d3, d4 = lineup[0][0], lineup[1][0], lineup[2][0], lineup[3][0]
+    conn.execute(
+        "INSERT OR REPLACE INTO segment_lineups"
+        " (year, segment, driver_1, driver_2, driver_3, driver_4, track_ids)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (year, segment, d1, d2, d3, d4, json.dumps(track_ids))
+    )
+    conn.commit()
     conn.close()
 
-    # ── Step 5: Write segment.json ─────────────────────────────────────────────
+    # ── Step 6: Write segment.json ─────────────────────────────────────────────
     config = {
         "year":        year,
         "segment":     segment,
-        "track_ids":   [t[0] for t in track_pairs],
+        "track_ids":   track_ids,
         "track_names": [t[1] for t in track_pairs],
     }
     with open(CONFIG_FILE, "w") as f:
