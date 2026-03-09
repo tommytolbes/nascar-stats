@@ -267,7 +267,7 @@ def fetch_race(conn, event_ref, year, race_num, venue_cache, known_drivers):
 
 # ── Per-year fetch ─────────────────────────────────────────────────────────────
 
-def fetch_year(conn, year, venue_cache, known_drivers):
+def fetch_year(conn, year, venue_cache, known_drivers, done_races):
     print(f"\n-- {year} ---------------------")
 
     # Get all event refs for this season
@@ -277,8 +277,13 @@ def fetch_year(conn, year, venue_cache, known_drivers):
 
     for race_num, item in enumerate(items, start=1):
         ref = item.get("$ref", "")
-        if ref:
-            fetch_race(conn, ref, year, race_num, venue_cache, known_drivers)
+        if not ref:
+            continue
+        # Skip races we already have complete (non-NULL finish_pos) results for
+        m = re.search(r"/events/(\w+)", ref)
+        if m and m.group(1) in done_races:
+            continue
+        fetch_race(conn, ref, year, race_num, venue_cache, known_drivers)
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
@@ -297,18 +302,20 @@ def main():
         row[0] for row in conn.execute("SELECT id FROM drivers")
     )
 
-    # Load already-processed races to allow resuming
+    # Races with at least one non-NULL finish_pos are complete - skip on future runs
     done_races = set(
-        row[0] for row in conn.execute("SELECT id FROM races")
+        row[0] for row in conn.execute(
+            "SELECT DISTINCT race_id FROM race_results WHERE finish_pos IS NOT NULL"
+        )
     )
-    print(f"  Already have {len(done_races)} races in DB (will skip these).")
+    print(f"  Already have complete results for {len(done_races)} races (will skip these).")
 
     venue_cache = set(
         row[0] for row in conn.execute("SELECT id FROM tracks")
     )
 
     for year in range(START_YEAR, END_YEAR + 1):
-        fetch_year(conn, year, venue_cache, known_drivers)
+        fetch_year(conn, year, venue_cache, known_drivers, done_races)
 
     conn.close()
 
