@@ -159,6 +159,15 @@ def _driver_name(conn, driver_id):
     return row[0] if row else "Driver " + str(driver_id)
 
 
+def _fmt(n):
+    """Format a number with commas. Drops .0 decimals."""
+    if isinstance(n, float) and n == int(n):
+        return f"{int(n):,}"
+    if isinstance(n, float):
+        return f"{n:,.1f}"
+    return f"{int(n):,}"
+
+
 def get_user_lineup(conn, cfg):
     yr, seg = cfg["year"], cfg["segment"]
     row = conn.execute(
@@ -272,8 +281,14 @@ def get_or_compute_optimal(conn, year, segment, track_ids):
     ).fetchone()
     if cached:
         driver_ids = [cached[0], cached[1], cached[2], cached[3]]
+        def _sal(did):
+            row = conn.execute(
+                "SELECT salary FROM driver_salaries WHERE driver_id=? AND year=? AND segment=?",
+                (did, year, segment)
+            ).fetchone()
+            return row[0] if row else 0
         return {
-            "drivers":      [{"name": _driver_name(conn, did), "salary": 0} for did in driver_ids],
+            "drivers":      [{"name": _driver_name(conn, did), "salary": _sal(did)} for did in driver_ids],
             "total_salary": cached[4],
             "total_pts":    round(cached[5], 1),
         }
@@ -569,11 +584,11 @@ def segment_intelligence_html(user, prev, optimal_prev, standings, cfg):
     else:
         parts.append('<div class="intel-chips">' + _driver_chips(user["drivers"]) + "</div>")
         parts.append(
-            '<div class="intel-pts">' + str(user["total_pts"]) + "</div>"
+            '<div class="intel-pts">' + _fmt(user["total_pts"]) + "</div>"
             + '<div class="intel-meta">points through ' + str(user["races_done"])
             + " of " + str(user["total_races"]) + " races"
-            + " &nbsp;&bull;&nbsp; $" + str(user["total_salary"]) + " salary"
-            + " &nbsp;&bull;&nbsp; $" + str(100 - user["total_salary"]) + " remaining cap</div>"
+            + " &nbsp;&bull;&nbsp; $" + _fmt(user["total_salary"]) + " salary"
+            + " &nbsp;&bull;&nbsp; $" + _fmt(100 - user["total_salary"]) + " remaining cap</div>"
         )
     parts.append("</div>")
 
@@ -589,8 +604,8 @@ def segment_intelligence_html(user, prev, optimal_prev, standings, cfg):
         parts.append('<div class="intel-label">Segment ' + str(prev["segment"]) + " Your Team</div>")
         parts.append('<div class="intel-chips">' + _driver_chips(prev["drivers"]) + "</div>")
         parts.append(
-            '<div class="intel-pts">' + str(prev["total_pts"]) + "</div>"
-            + '<div class="intel-meta">points scored &nbsp;&bull;&nbsp; $' + str(prev["total_salary"]) + " salary</div>"
+            '<div class="intel-pts">' + _fmt(prev["total_pts"]) + "</div>"
+            + '<div class="intel-meta">points scored &nbsp;&bull;&nbsp; $' + _fmt(prev["total_salary"]) + " salary</div>"
         )
         if optimal_prev:
             gap = round(optimal_prev["total_pts"] - prev["total_pts"], 1)
@@ -598,8 +613,8 @@ def segment_intelligence_html(user, prev, optimal_prev, standings, cfg):
             eff_cls = "eff-good" if eff >= 90 else ("eff-mid" if eff >= 70 else "eff-low")
             parts.append(
                 '<div class="intel-meta" style="margin-top:10px;">'
-                + 'Efficiency: <span class="efficiency ' + eff_cls + '">' + str(eff) + '%</span>'
-                + ' &nbsp;&bull;&nbsp; left on table: <span style="color:var(--red)">-' + str(gap) + ' pts</span>'
+                + 'Efficiency: <span class="efficiency ' + eff_cls + '">' + _fmt(eff) + '%</span>'
+                + ' &nbsp;&bull;&nbsp; left on table: <span style="color:var(--red)">-' + _fmt(gap) + ' pts</span>'
                 + '</div>'
             )
     parts.append("</div>")
@@ -618,14 +633,14 @@ def segment_intelligence_html(user, prev, optimal_prev, standings, cfg):
         parts.append('<div class="intel-label">Segment ' + str(prev_seg) + " Optimal</div>")
         parts.append('<div class="intel-chips">' + _driver_chips(optimal_prev["drivers"]) + "</div>")
         parts.append(
-            '<div class="intel-pts">' + str(optimal_prev["total_pts"]) + "</div>"
-            + '<div class="intel-meta">max possible &nbsp;&bull;&nbsp; $' + str(optimal_prev["total_salary"]) + " salary</div>"
+            '<div class="intel-pts">' + _fmt(optimal_prev["total_pts"]) + "</div>"
+            + '<div class="intel-meta">max possible &nbsp;&bull;&nbsp; $' + _fmt(optimal_prev["total_salary"]) + " salary</div>"
         )
         if prev:
             gap = round(optimal_prev["total_pts"] - prev["total_pts"], 1)
             parts.append(
                 '<div class="intel-meta" style="margin-top:10px;">'
-                + 'Gap vs your team: <span style="color:#2ecc71">+' + str(gap) + ' pts available</span>'
+                + 'Gap vs your team: <span style="color:#2ecc71">+' + _fmt(gap) + ' pts available</span>'
                 + '</div>'
             )
     parts.append("</div>")
