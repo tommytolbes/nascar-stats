@@ -574,8 +574,8 @@ def segment_intelligence_html(user, prev, optimal_prev, standings, cfg):
     yr, seg = cfg["year"], cfg["segment"]
     parts = [
         '<p style="font-size:0.75rem;color:var(--muted);margin-bottom:12px;">'
-        '&#9432; Scores include qualifying &amp; race pts only '
-        '(stage pts &amp; team bonuses not yet tracked). '
+        '&#9432; Scores include qual, race &amp; stage pts. '
+        'Stage pts require loading weekly PDFs via fetch_stages.py. '
         'Qualifying events (Duels, Clash, All-Star) excluded.</p>',
         '<div class="intel-grid">',
     ]

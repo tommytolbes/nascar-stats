@@ -8,11 +8,13 @@ Creates four new tables in nascar.db:
   segments        : which races make up each 4-race segment
   fantasy_scores  : pre-calculated fantasy points per driver per race
 
-Scoring used (stage points excluded for now):
+Scoring:
   - Race pts       : position 1-41 (300 down to 5)
   - Qualifying pts : position 1-15 (75 down to 1)
   - Race leader    : +100 pts (driver who led the most laps)
   - Qual leader    : +25 pts  (pole sitter, start_pos = 1)
+  - Stage pts      : same QUAL_PTS scale per stage (from fetch_stages.py data)
+  - Stage bonus    : +25 pts per stage won
 
 Run this after main.py and fetch_races.py have populated nascar.db.
 Re-run any time new race data is added -- already-scored races are skipped.
@@ -143,12 +145,27 @@ def setup_tables(conn):
             race_pts         INTEGER NOT NULL DEFAULT 0,
             qual_leader_bonus INTEGER NOT NULL DEFAULT 0,
             race_leader_bonus INTEGER NOT NULL DEFAULT 0,
+            stage_pts        INTEGER NOT NULL DEFAULT 0,
+            stage_bonus      INTEGER NOT NULL DEFAULT 0,
             total_pts        INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (race_id)   REFERENCES races(id),
             FOREIGN KEY (driver_id) REFERENCES drivers(id),
             UNIQUE (race_id, driver_id)
         );
     """)
+    conn.commit()
+
+    # Add new columns to existing DBs that pre-date them
+    for col_def in [
+        ("stage_pts",   "INTEGER NOT NULL DEFAULT 0"),
+        ("stage_bonus", "INTEGER NOT NULL DEFAULT 0"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE fantasy_scores ADD COLUMN {col_def[0]} {col_def[1]}")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+
     conn.commit()
     print("Tables ready.")
 
@@ -276,6 +293,57 @@ def calculate_fantasy_scores(conn):
     total_scored = conn.execute("SELECT COUNT(*) FROM fantasy_scores").fetchone()[0]
     print(f"Done. {total_scored} total scored driver-race entries in fantasy_scores.")
 
+# ── Stage points update ────────────────────────────────────────────────────────
+
+STAGE_BONUS = 25  # pts for winning a stage
+
+
+def update_stage_pts(conn):
+    """Apply stage points and bonuses from stage_results into fantasy_scores."""
+    tbl = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='stage_results'"
+    ).fetchone()
+    if not tbl:
+        print("No stage_results table — skipping stage points.")
+        return
+
+    rows = conn.execute(
+        "SELECT race_id, driver_id, stage1_pos, stage2_pos FROM stage_results"
+    ).fetchall()
+
+    if not rows:
+        print("No stage results in DB — skipping stage points.")
+        return
+
+    updated = 0
+    for race_id, driver_id, s1, s2 in rows:
+        s1_pts   = QUAL_PTS.get(s1, 0) if s1 else 0
+        s2_pts   = QUAL_PTS.get(s2, 0) if s2 else 0
+        s1_bonus = STAGE_BONUS if s1 == 1 else 0
+        s2_bonus = STAGE_BONUS if s2 == 1 else 0
+        stage_pts   = s1_pts + s2_pts
+        stage_bonus = s1_bonus + s2_bonus
+
+        fs = conn.execute("""
+            SELECT qualifying_pts, race_pts, qual_leader_bonus, race_leader_bonus
+            FROM fantasy_scores WHERE race_id=? AND driver_id=?
+        """, (race_id, driver_id)).fetchone()
+        if not fs:
+            continue
+
+        total = fs[0] + fs[1] + fs[2] + fs[3] + stage_pts + stage_bonus
+
+        conn.execute("""
+            UPDATE fantasy_scores
+            SET stage_pts=?, stage_bonus=?, total_pts=?
+            WHERE race_id=? AND driver_id=?
+        """, (stage_pts, stage_bonus, total, race_id, driver_id))
+        updated += 1
+
+    conn.commit()
+    print(f"Stage points applied: {updated} driver-race entries updated.")
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def main():
@@ -290,6 +358,7 @@ def main():
     load_segments(conn)
     load_salaries(conn)
     calculate_fantasy_scores(conn)
+    update_stage_pts(conn)
 
     conn.close()
     print("\n" + "=" * 50)
