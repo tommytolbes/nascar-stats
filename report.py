@@ -186,8 +186,8 @@ def get_user_lineup(conn, cfg):
         pts_row = conn.execute(
             "SELECT COALESCE(SUM(fs.total_pts), 0) FROM fantasy_scores fs"
             " JOIN races r ON r.id = fs.race_id"
-            " WHERE fs.driver_id = ? AND r.track_id IN (" + ph + ")",
-            (did, *track_ids)
+            " WHERE fs.driver_id = ? AND r.track_id IN (" + ph + ") AND r.year = ?",
+            (did, *track_ids, yr)
         ).fetchone()
         pts = round(pts_row[0], 1) if pts_row else 0
         drivers.append({"name": name, "salary": salary, "pts": pts})
@@ -245,8 +245,8 @@ def get_prev_lineup(conn, cfg):
             pts_row = conn.execute(
                 "SELECT COALESCE(SUM(fs.total_pts), 0) FROM fantasy_scores fs"
                 " JOIN races r ON r.id = fs.race_id"
-                " WHERE fs.driver_id = ? AND r.track_id IN (" + ph + ")",
-                (did, *track_ids)
+                " WHERE fs.driver_id = ? AND r.track_id IN (" + ph + ") AND r.year = ?",
+                (did, *track_ids, yr)
             ).fetchone()
             pts = round(pts_row[0], 1) if pts_row else 0
 
@@ -297,10 +297,10 @@ def get_or_compute_optimal(conn, year, segment, track_ids):
         " JOIN drivers d ON d.id = fs.driver_id"
         " JOIN driver_salaries ds ON ds.driver_id = fs.driver_id"
         "     AND ds.year = ? AND ds.segment = ?"
-        " WHERE r.track_id IN (" + ph + ")"
+        " WHERE r.track_id IN (" + ph + ") AND r.year = ?"
         " GROUP BY fs.driver_id"
         " HAVING COUNT(DISTINCT r.track_id) = ?",
-        (year, segment, *track_ids, len(track_ids))
+        (year, segment, *track_ids, year, len(track_ids))
     ).fetchall()
 
     best = None
