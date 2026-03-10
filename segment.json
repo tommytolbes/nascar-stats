@@ -1,11 +1,16 @@
 {
   "year": 2026,
-  "segment": 1,
-  "track_ids": [1, 18, 253, 16],
+  "segment": 2,
+  "track_ids": [
+    20,
+    13,
+    14,
+    12
+  ],
   "track_names": [
-    "Daytona International Speedway",
-    "Atlanta Motor Speedway",
-    "Circuit of the Americas",
-    "Phoenix International Raceway"
+    "Las Vegas Motor Speedway",
+    "Darlington Raceway",
+    "Martinsville Speedway",
+    "Bristol Motor Speedway"
   ]
 }
