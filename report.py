@@ -195,7 +195,7 @@ def get_user_lineup(conn, cfg):
         pts_row = conn.execute(
             "SELECT COALESCE(SUM(fs.total_pts), 0) FROM fantasy_scores fs"
             " JOIN races r ON r.id = fs.race_id"
-            " WHERE fs.driver_id = ? AND r.track_id IN (" + ph + ") AND r.year = ?",
+            " WHERE fs.driver_id = ? AND r.track_id IN (" + ph + ") AND r.year = ? AND r.name NOT LIKE '%Duel%' AND r.name NOT LIKE '%Clash%' AND r.name NOT LIKE '%All-Star%' AND r.name NOT LIKE '%All Star%'",
             (did, *track_ids, yr)
         ).fetchone()
         pts = round(pts_row[0], 1) if pts_row else 0
@@ -209,7 +209,8 @@ def get_user_lineup(conn, cfg):
         "SELECT COUNT(DISTINCT r.id) FROM races r"
         " WHERE r.track_id IN (" + ph + ") AND r.year = ?"
         " AND EXISTS (SELECT 1 FROM race_results rr"
-        "             WHERE rr.race_id = r.id AND rr.finish_pos IS NOT NULL)",
+        "             WHERE rr.race_id = r.id AND rr.finish_pos IS NOT NULL)"
+        " AND r.name NOT LIKE '%Duel%' AND r.name NOT LIKE '%Clash%' AND r.name NOT LIKE '%All-Star%' AND r.name NOT LIKE '%All Star%'",
         (*track_ids, yr)
     ).fetchone()[0]
 
@@ -254,7 +255,7 @@ def get_prev_lineup(conn, cfg):
             pts_row = conn.execute(
                 "SELECT COALESCE(SUM(fs.total_pts), 0) FROM fantasy_scores fs"
                 " JOIN races r ON r.id = fs.race_id"
-                " WHERE fs.driver_id = ? AND r.track_id IN (" + ph + ") AND r.year = ?",
+                " WHERE fs.driver_id = ? AND r.track_id IN (" + ph + ") AND r.year = ? AND r.name NOT LIKE '%Duel%' AND r.name NOT LIKE '%Clash%' AND r.name NOT LIKE '%All-Star%' AND r.name NOT LIKE '%All Star%'",
                 (did, *track_ids, yr)
             ).fetchone()
             pts = round(pts_row[0], 1) if pts_row else 0
@@ -298,7 +299,8 @@ def get_or_compute_optimal(conn, year, segment, track_ids):
         "SELECT COUNT(DISTINCT r.track_id) FROM races r"
         " WHERE r.track_id IN (" + ph + ") AND r.year = ?"
         " AND EXISTS (SELECT 1 FROM race_results rr"
-        "             WHERE rr.race_id = r.id AND rr.finish_pos IS NOT NULL)",
+        "             WHERE rr.race_id = r.id AND rr.finish_pos IS NOT NULL)"
+        " AND r.name NOT LIKE '%Duel%' AND r.name NOT LIKE '%Clash%' AND r.name NOT LIKE '%All-Star%' AND r.name NOT LIKE '%All Star%'",
         (*track_ids, year)
     ).fetchone()[0]
 
@@ -312,7 +314,7 @@ def get_or_compute_optimal(conn, year, segment, track_ids):
         " JOIN drivers d ON d.id = fs.driver_id"
         " JOIN driver_salaries ds ON ds.driver_id = fs.driver_id"
         "     AND ds.year = ? AND ds.segment = ?"
-        " WHERE r.track_id IN (" + ph + ") AND r.year = ?"
+        " WHERE r.track_id IN (" + ph + ") AND r.year = ? AND r.name NOT LIKE '%Duel%' AND r.name NOT LIKE '%Clash%' AND r.name NOT LIKE '%All-Star%' AND r.name NOT LIKE '%All Star%'"
         " GROUP BY fs.driver_id"
         " HAVING COUNT(DISTINCT r.track_id) = ?",
         (year, segment, *track_ids, year, len(track_ids))
@@ -570,7 +572,13 @@ def _driver_chips(drivers):
 
 def segment_intelligence_html(user, prev, optimal_prev, standings, cfg):
     yr, seg = cfg["year"], cfg["segment"]
-    parts = ['<div class="intel-grid">']
+    parts = [
+        '<p style="font-size:0.75rem;color:var(--muted);margin-bottom:12px;">'
+        '&#9432; Scores include qualifying &amp; race pts only '
+        '(stage pts &amp; team bonuses not yet tracked). '
+        'Qualifying events (Duels, Clash, All-Star) excluded.</p>',
+        '<div class="intel-grid">',
+    ]
 
     # Panel 1: Current Segment Team
     parts.append('<div class="intel-card current intel-full">')
