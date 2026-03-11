@@ -269,6 +269,36 @@ def get_prev_lineup(conn, cfg):
     driver_pts   = round(sum(d["pts"] for d in drivers), 1)
     team_bonus   = get_team_bonus_total(conn, USER_TEAM, track_ids, yr)
 
+    # Per-race breakdown for the table
+    breakdown = []
+    if track_ids:
+        valid_ids = [d for d in driver_ids if d is not None]
+        ph_t  = ",".join("?" * len(track_ids))
+        ph_d  = ",".join("?" * len(valid_ids))
+        brows = conn.execute(f"""
+            SELECT r.name,
+                   SUM(fs.qualifying_pts),
+                   SUM(fs.race_pts),
+                   SUM(fs.qual_leader_bonus),
+                   SUM(fs.stage_pts),
+                   SUM(fs.total_pts)
+            FROM fantasy_scores fs
+            JOIN races r ON r.id = fs.race_id
+            WHERE r.track_id IN ({ph_t}) AND r.year = ?
+              AND fs.driver_id IN ({ph_d})
+              AND r.name NOT LIKE '%Duel%'
+              AND r.name NOT LIKE '%Clash%'
+              AND r.name NOT LIKE '%All-Star%'
+              AND r.name NOT LIKE '%All Star%'
+            GROUP BY r.id, r.name
+            ORDER BY r.date
+        """, (*track_ids, yr, *valid_ids)).fetchall()
+        for rname, q, r, ql, sp, tot in brows:
+            for prefix in ("NASCAR Cup Series at ", "NASCAR Cup Series At "):
+                rname = rname.replace(prefix, "")
+            rname = rname.replace("Circuit of the Americas", "COTA")
+            breakdown.append({"race": rname, "q": q, "r": r, "ql": ql, "sp": sp, "total": tot})
+
     return {
         "drivers":      drivers,
         "total_salary": sum(d["salary"] for d in drivers),
@@ -277,6 +307,7 @@ def get_prev_lineup(conn, cfg):
         "total_pts":    driver_pts,  # team bonus shown separately; not baked into score
         "segment":      prev_seg,
         "track_ids":    track_ids,
+        "breakdown":    breakdown,
     }
 
 
@@ -666,6 +697,31 @@ def segment_intelligence_html(user, prev, optimal_prev, standings, cfg):
             + '<div class="intel-meta">points scored &nbsp;&bull;&nbsp; $'
             + _fmt(prev["total_salary"]) + " salary" + bonus_meta + "</div>"
         )
+        # Per-race breakdown table
+        breakdown = prev.get("breakdown", [])
+        if breakdown:
+            parts.append('<div style="margin-top:14px;">')
+            parts.append('<div class="intel-meta" style="margin-bottom:6px;font-weight:600;">Segment ' + str(prev["segment"]) + ' breakdown:</div>')
+            parts.append('<div class="table-wrap"><table><thead><tr>')
+            for h in ["Race", "Q", "R", "QL", "Stage Pts", "Total"]:
+                parts.append("<th>" + h + "</th>")
+            parts.append("</tr></thead><tbody>")
+            for row in breakdown:
+                parts.append("<tr>")
+                parts.append("<td>" + row["race"] + "</td>")
+                for val in [row["q"], row["r"], row["ql"], row["sp"], row["total"]]:
+                    color = ""
+                    if val == 0:
+                        color = ' style="color:var(--muted)"'
+                    parts.append("<td" + color + ">" + _fmt(val) + "</td>")
+                parts.append("</tr>")
+            # Totals row
+            parts.append('<tr style="font-weight:600;border-top:2px solid var(--muted)">')
+            parts.append("<td>Total</td>")
+            for key in ["q", "r", "ql", "sp", "total"]:
+                parts.append("<td>" + _fmt(sum(row[key] for row in breakdown)) + "</td>")
+            parts.append("</tr>")
+            parts.append("</tbody></table></div></div>")
         if optimal_prev:
             gap = round(optimal_prev["total_pts"] - prev["total_pts"], 1)
             eff = round(prev["total_pts"] / optimal_prev["total_pts"] * 100, 1) if optimal_prev["total_pts"] > 0 else 0.0
