@@ -21,7 +21,8 @@ Team bonuses (per race, stored in team_race_bonuses):
   - Race           : +100 to team with highest combined race pts
 
 Note: race_leader_bonus and stage_bonus columns in fantasy_scores are kept
-for schema compatibility but are always 0 (these are team-only bonuses).
+for schema compatibility but are always 0 (team-only bonuses).
+qual_leader_bonus IS awarded individually (+25 for pole sitter).
 
 Run this after main.py and fetch_races.py have populated nascar.db.
 Re-run any time new race data is added -- already-scored races are skipped.
@@ -285,9 +286,9 @@ def calculate_fantasy_scores(conn):
         for driver_id, finish_pos, start_pos, laps_led in results:
             race_pts  = RACE_PTS.get(finish_pos, 0) if finish_pos else 0
             qual_pts  = QUAL_PTS.get(start_pos, 0)  if start_pos else 0
-            ql_bonus  = 0  # qual_leader_bonus is a TEAM-only bonus
+            ql_bonus  = QUAL_LEADER_BONUS if start_pos == 1 else 0
             rl_bonus  = 0  # race_leader_bonus is a TEAM-only bonus
-            total     = race_pts + qual_pts
+            total     = race_pts + qual_pts + ql_bonus
 
             conn.execute("""
                 INSERT OR IGNORE INTO fantasy_scores
