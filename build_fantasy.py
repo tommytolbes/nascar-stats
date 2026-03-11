@@ -8,13 +8,20 @@ Creates four new tables in nascar.db:
   segments        : which races make up each 4-race segment
   fantasy_scores  : pre-calculated fantasy points per driver per race
 
-Scoring:
+Scoring (individual):
   - Race pts       : position 1-41 (300 down to 5)
   - Qualifying pts : position 1-15 (75 down to 1)
-  - Race leader    : +100 pts (driver who led the most laps)
   - Qual leader    : +25 pts  (pole sitter, start_pos = 1)
   - Stage pts      : same QUAL_PTS scale per stage (from fetch_stages.py data)
-  - Stage bonus    : +25 pts per stage won
+
+Team bonuses (per race, stored in team_race_bonuses):
+  - Qualifying     : +25 to team with highest combined qualifying pts
+  - Stage 1        : +25 to team with highest combined stage 1 pts
+  - Stage 2        : +25 to team with highest combined stage 2 pts
+  - Race           : +100 to team with highest combined race pts
+
+Note: race_leader_bonus and stage_bonus columns in fantasy_scores are kept
+for schema compatibility but are always 0 (these are team-only bonuses).
 
 Run this after main.py and fetch_races.py have populated nascar.db.
 Re-run any time new race data is added -- already-scored races are skipped.
@@ -278,9 +285,9 @@ def calculate_fantasy_scores(conn):
         for driver_id, finish_pos, start_pos, laps_led in results:
             race_pts  = RACE_PTS.get(finish_pos, 0) if finish_pos else 0
             qual_pts  = QUAL_PTS.get(start_pos, 0)  if start_pos else 0
-            ql_bonus  = QUAL_LEADER_BONUS if start_pos == 1 else 0
-            rl_bonus  = RACE_LEADER_BONUS if driver_id in leader_ids else 0
-            total     = race_pts + qual_pts + ql_bonus + rl_bonus
+            ql_bonus  = 0  # qual_leader_bonus is a TEAM-only bonus
+            rl_bonus  = 0  # race_leader_bonus is a TEAM-only bonus
+            total     = race_pts + qual_pts
 
             conn.execute("""
                 INSERT OR IGNORE INTO fantasy_scores
@@ -318,21 +325,19 @@ def update_stage_pts(conn):
 
     updated = 0
     for race_id, driver_id, s1, s2 in rows:
-        s1_pts   = QUAL_PTS.get(s1, 0) if s1 else 0
-        s2_pts   = QUAL_PTS.get(s2, 0) if s2 else 0
-        s1_bonus = STAGE_BONUS if s1 == 1 else 0
-        s2_bonus = STAGE_BONUS if s2 == 1 else 0
+        s1_pts      = QUAL_PTS.get(s1, 0) if s1 else 0
+        s2_pts      = QUAL_PTS.get(s2, 0) if s2 else 0
         stage_pts   = s1_pts + s2_pts
-        stage_bonus = s1_bonus + s2_bonus
+        stage_bonus = 0  # stage win bonus is TEAM-only
 
         fs = conn.execute("""
-            SELECT qualifying_pts, race_pts, qual_leader_bonus, race_leader_bonus
+            SELECT qualifying_pts, race_pts, qual_leader_bonus
             FROM fantasy_scores WHERE race_id=? AND driver_id=?
         """, (race_id, driver_id)).fetchone()
         if not fs:
             continue
 
-        total = fs[0] + fs[1] + fs[2] + fs[3] + stage_pts + stage_bonus
+        total = fs[0] + fs[1] + fs[2] + stage_pts
 
         conn.execute("""
             UPDATE fantasy_scores
