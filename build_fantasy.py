@@ -22,6 +22,7 @@ Re-run any time new race data is added -- already-scored races are skipped.
 Usage:   python build_fantasy.py
 """
 
+import json
 import sqlite3
 
 DB_FILE = "nascar.db"
@@ -344,6 +345,176 @@ def update_stage_pts(conn):
     print(f"Stage points applied: {updated} driver-race entries updated.")
 
 
+# ── Team bonus computation ─────────────────────────────────────────────────────
+#
+# For each race in each segment, the team whose 4 drivers combined for the
+# most points in a given category wins a bonus:
+#
+#   Category          Bonus
+#   ----------------  -----
+#   Qualifying        +25
+#   Stage 1           +25
+#   Stage 2           +25
+#   Race finish       +100
+#
+# Ties: all tied teams receive the bonus.
+# A category is skipped (no bonus awarded) if the winning total is 0.
+
+TEAM_QUAL_BONUS  = 25
+TEAM_STAGE_BONUS = 25
+TEAM_RACE_BONUS  = 100
+
+
+def setup_team_bonus_table(conn):
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS team_race_bonuses (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            race_id    TEXT    NOT NULL,
+            team_name  TEXT    NOT NULL,
+            qual_bonus INTEGER NOT NULL DEFAULT 0,
+            s1_bonus   INTEGER NOT NULL DEFAULT 0,
+            s2_bonus   INTEGER NOT NULL DEFAULT 0,
+            race_bonus INTEGER NOT NULL DEFAULT 0,
+            UNIQUE (race_id, team_name)
+        );
+    """)
+    conn.commit()
+
+
+def compute_team_bonuses(conn):
+    """
+    Fill team_race_bonuses for every (year, segment) that has league_team_picks
+    and completed fantasy_scores.  Safe to re-run; already-computed races are
+    skipped via INSERT OR IGNORE.
+    """
+    # Need league_team_picks to exist
+    if not conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='league_team_picks'"
+    ).fetchone():
+        print("No league_team_picks table — run fetch_teams.py first.")
+        return
+
+    # Each distinct year/segment in team picks
+    seg_rows = conn.execute(
+        "SELECT DISTINCT year, segment FROM league_team_picks ORDER BY year, segment"
+    ).fetchall()
+
+    if not seg_rows:
+        print("league_team_picks is empty — run fetch_teams.py first.")
+        return
+
+    total_written = 0
+
+    for year, segment in seg_rows:
+        # Get track_ids for this segment (stored in segment_lineups by load_segment.py)
+        sl_row = conn.execute(
+            "SELECT track_ids FROM segment_lineups WHERE year=? AND segment=?",
+            (year, segment)
+        ).fetchone()
+        if not sl_row:
+            print(f"  No segment_lineups record for {year}/seg{segment} — skipping.")
+            continue
+
+        track_ids = json.loads(sl_row[0])
+        ph        = ",".join("?" * len(track_ids))
+
+        # Find all scored races for this segment (exclude non-points events)
+        races = conn.execute(f"""
+            SELECT DISTINCT r.id
+            FROM races r
+            WHERE r.track_id IN ({ph}) AND r.year = ?
+              AND EXISTS (SELECT 1 FROM fantasy_scores fs WHERE fs.race_id = r.id)
+              AND r.name NOT LIKE '%Duel%'
+              AND r.name NOT LIKE '%Clash%'
+              AND r.name NOT LIKE '%All-Star%'
+              AND r.name NOT LIKE '%All Star%'
+        """, (*track_ids, year)).fetchall()
+
+        if not races:
+            continue
+
+        # Build team → [driver_ids] map
+        teams = {}
+        for team_name, driver_id in conn.execute(
+            "SELECT team_name, driver_id FROM league_team_picks WHERE year=? AND segment=?",
+            (year, segment)
+        ).fetchall():
+            teams.setdefault(team_name, []).append(driver_id)
+
+        if not teams:
+            continue
+
+        for (race_id,) in races:
+            # Skip if already computed for all teams
+            existing = conn.execute(
+                "SELECT COUNT(*) FROM team_race_bonuses WHERE race_id=?", (race_id,)
+            ).fetchone()[0]
+            if existing >= len(teams):
+                continue
+
+            # Pull stage positions for this race
+            stage_map = {
+                r[0]: (r[1], r[2])
+                for r in conn.execute(
+                    "SELECT driver_id, stage1_pos, stage2_pos FROM stage_results WHERE race_id=?",
+                    (race_id,)
+                ).fetchall()
+            }
+
+            # Pull qualifying_pts and race_pts from fantasy_scores
+            fs_map = {
+                r[0]: (r[1], r[2])
+                for r in conn.execute(
+                    "SELECT driver_id, qualifying_pts, race_pts FROM fantasy_scores WHERE race_id=?",
+                    (race_id,)
+                ).fetchall()
+            }
+
+            # Compute totals per team
+            team_qual = {}
+            team_s1   = {}
+            team_s2   = {}
+            team_race = {}
+
+            for team_name, driver_ids in teams.items():
+                q = s1 = s2 = rp = 0
+                for did in driver_ids:
+                    fs = fs_map.get(did)
+                    if fs:
+                        q  += fs[0]
+                        rp += fs[1]
+                    sr = stage_map.get(did)
+                    if sr:
+                        s1 += QUAL_PTS.get(sr[0], 0) if sr[0] else 0
+                        s2 += QUAL_PTS.get(sr[1], 0) if sr[1] else 0
+                team_qual[team_name] = q
+                team_s1[team_name]   = s1
+                team_s2[team_name]   = s2
+                team_race[team_name] = rp
+
+            max_qual = max(team_qual.values())
+            max_s1   = max(team_s1.values())
+            max_s2   = max(team_s2.values())
+            max_race = max(team_race.values())
+
+            for team_name in teams:
+                qb  = TEAM_QUAL_BONUS  if max_qual > 0 and team_qual[team_name] == max_qual else 0
+                s1b = TEAM_STAGE_BONUS if max_s1   > 0 and team_s1[team_name]   == max_s1   else 0
+                s2b = TEAM_STAGE_BONUS if max_s2   > 0 and team_s2[team_name]   == max_s2   else 0
+                rb  = TEAM_RACE_BONUS  if max_race > 0 and team_race[team_name] == max_race  else 0
+
+                conn.execute("""
+                    INSERT OR IGNORE INTO team_race_bonuses
+                        (race_id, team_name, qual_bonus, s1_bonus, s2_bonus, race_bonus)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (race_id, team_name, qb, s1b, s2b, rb))
+                total_written += 1
+
+        conn.commit()
+
+    print(f"Team bonuses computed: {total_written} team-race entries written.")
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def main():
@@ -354,11 +525,13 @@ def main():
     conn = sqlite3.connect(DB_FILE)
 
     setup_tables(conn)
+    setup_team_bonus_table(conn)
     load_points_scale(conn)
     load_segments(conn)
     load_salaries(conn)
     calculate_fantasy_scores(conn)
     update_stage_pts(conn)
+    compute_team_bonuses(conn)
 
     conn.close()
     print("\n" + "=" * 50)

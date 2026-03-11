@@ -202,7 +202,9 @@ def get_user_lineup(conn, cfg):
         drivers.append({"name": name, "salary": salary, "pts": pts})
 
     total_salary = sum(d["salary"] for d in drivers)
-    total_pts    = round(sum(d["pts"] for d in drivers), 1)
+    driver_pts   = round(sum(d["pts"] for d in drivers), 1)
+    team_bonus   = get_team_bonus_total(conn, USER_TEAM, track_ids, yr)
+    total_pts    = round(driver_pts + team_bonus, 1)
 
     ph = ",".join("?" * len(track_ids))
     races_done = conn.execute(
@@ -217,6 +219,8 @@ def get_user_lineup(conn, cfg):
     return {
         "drivers":      drivers,
         "total_salary": total_salary,
+        "driver_pts":   driver_pts,
+        "team_bonus":   team_bonus,
         "total_pts":    total_pts,
         "races_done":   races_done,
         "total_races":  len(track_ids),
@@ -262,10 +266,15 @@ def get_prev_lineup(conn, cfg):
 
         drivers.append({"name": name, "salary": salary, "pts": pts})
 
+    driver_pts   = round(sum(d["pts"] for d in drivers), 1)
+    team_bonus   = get_team_bonus_total(conn, USER_TEAM, track_ids, yr)
+
     return {
         "drivers":      drivers,
         "total_salary": sum(d["salary"] for d in drivers),
-        "total_pts":    round(sum(d["pts"] for d in drivers), 1),
+        "driver_pts":   driver_pts,
+        "team_bonus":   team_bonus,
+        "total_pts":    round(driver_pts + team_bonus, 1),
         "segment":      prev_seg,
         "track_ids":    track_ids,
     }
@@ -346,6 +355,34 @@ def get_or_compute_optimal(conn, year, segment, track_ids):
         conn.commit()
 
     return best
+
+
+def get_team_bonus_total(conn, team_name, track_ids, year):
+    """
+    Return total team bonus points earned by team_name across the segment
+    identified by track_ids/year.  Returns 0 if no team_race_bonuses table
+    or no data.
+    """
+    if not track_ids:
+        return 0
+    if not conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='team_race_bonuses'"
+    ).fetchone():
+        return 0
+    ph  = ",".join("?" * len(track_ids))
+    row = conn.execute(f"""
+        SELECT COALESCE(SUM(trb.qual_bonus + trb.s1_bonus + trb.s2_bonus + trb.race_bonus), 0)
+        FROM team_race_bonuses trb
+        JOIN races r ON r.id = trb.race_id
+        WHERE trb.team_name = ?
+          AND r.track_id IN ({ph})
+          AND r.year = ?
+          AND r.name NOT LIKE '%Duel%'
+          AND r.name NOT LIKE '%Clash%'
+          AND r.name NOT LIKE '%All-Star%'
+          AND r.name NOT LIKE '%All Star%'
+    """, (team_name, *track_ids, year)).fetchone()
+    return row[0] if row else 0
 
 
 class _TableParser(HTMLParser):
@@ -591,12 +628,19 @@ def segment_intelligence_html(user, prev, optimal_prev, standings, cfg):
         )
     else:
         parts.append('<div class="intel-chips">' + _driver_chips(user["drivers"]) + "</div>")
+        bonus_line = ""
+        if user.get("team_bonus", 0) > 0:
+            bonus_line = (
+                ' &nbsp;&bull;&nbsp; <span style="color:#2ecc71">+'
+                + _fmt(user["team_bonus"]) + " team bonus</span>"
+            )
         parts.append(
             '<div class="intel-pts">' + _fmt(user["total_pts"]) + "</div>"
             + '<div class="intel-meta">points through ' + str(user["races_done"])
             + " of " + str(user["total_races"]) + " races"
             + " &nbsp;&bull;&nbsp; $" + _fmt(user["total_salary"]) + " salary"
-            + " &nbsp;&bull;&nbsp; $" + _fmt(100 - user["total_salary"]) + " remaining cap</div>"
+            + " &nbsp;&bull;&nbsp; $" + _fmt(100 - user["total_salary"]) + " remaining cap"
+            + bonus_line + "</div>"
         )
     parts.append("</div>")
 
@@ -611,18 +655,31 @@ def segment_intelligence_html(user, prev, optimal_prev, standings, cfg):
     else:
         parts.append('<div class="intel-label">Segment ' + str(prev["segment"]) + " Your Team</div>")
         parts.append('<div class="intel-chips">' + _driver_chips(prev["drivers"]) + "</div>")
+        bonus_meta = ""
+        if prev.get("team_bonus", 0) > 0:
+            bonus_meta = (
+                ' &nbsp;&bull;&nbsp; <span style="color:#2ecc71">+'
+                + _fmt(prev["team_bonus"]) + " team bonus</span>"
+            )
         parts.append(
             '<div class="intel-pts">' + _fmt(prev["total_pts"]) + "</div>"
-            + '<div class="intel-meta">points scored &nbsp;&bull;&nbsp; $' + _fmt(prev["total_salary"]) + " salary</div>"
+            + '<div class="intel-meta">points scored &nbsp;&bull;&nbsp; $'
+            + _fmt(prev["total_salary"]) + " salary" + bonus_meta + "</div>"
         )
         if optimal_prev:
             gap = round(optimal_prev["total_pts"] - prev["total_pts"], 1)
             eff = round(prev["total_pts"] / optimal_prev["total_pts"] * 100, 1) if optimal_prev["total_pts"] > 0 else 0.0
             eff_cls = "eff-good" if eff >= 90 else ("eff-mid" if eff >= 70 else "eff-low")
+            if gap > 0:
+                table_html = ' &nbsp;&bull;&nbsp; left on table: <span style="color:var(--red)">-' + _fmt(gap) + ' pts</span>'
+            elif gap < 0:
+                table_html = ' &nbsp;&bull;&nbsp; <span style="color:#2ecc71">beat historical optimal by ' + _fmt(-gap) + ' pts</span>'
+            else:
+                table_html = ""
             parts.append(
                 '<div class="intel-meta" style="margin-top:10px;">'
                 + 'Efficiency: <span class="efficiency ' + eff_cls + '">' + _fmt(eff) + '%</span>'
-                + ' &nbsp;&bull;&nbsp; left on table: <span style="color:var(--red)">-' + _fmt(gap) + ' pts</span>'
+                + table_html
                 + '</div>'
             )
     parts.append("</div>")
@@ -642,13 +699,17 @@ def segment_intelligence_html(user, prev, optimal_prev, standings, cfg):
         parts.append('<div class="intel-chips">' + _driver_chips(optimal_prev["drivers"]) + "</div>")
         parts.append(
             '<div class="intel-pts">' + _fmt(optimal_prev["total_pts"]) + "</div>"
-            + '<div class="intel-meta">max possible &nbsp;&bull;&nbsp; $' + _fmt(optimal_prev["total_salary"]) + " salary</div>"
+            + '<div class="intel-meta">max possible (no team bonus) &nbsp;&bull;&nbsp; $' + _fmt(optimal_prev["total_salary"]) + " salary</div>"
         )
         if prev:
             gap = round(optimal_prev["total_pts"] - prev["total_pts"], 1)
+            if gap > 0:
+                gap_html = 'Gap vs your team: <span style="color:#2ecc71">+' + _fmt(gap) + ' pts available</span>'
+            else:
+                gap_html = '<span style="color:#2ecc71">Your team beat the historical optimal by ' + _fmt(-gap) + ' pts</span>'
             parts.append(
                 '<div class="intel-meta" style="margin-top:10px;">'
-                + 'Gap vs your team: <span style="color:#2ecc71">+' + _fmt(gap) + ' pts available</span>'
+                + gap_html
                 + '</div>'
             )
     parts.append("</div>")
