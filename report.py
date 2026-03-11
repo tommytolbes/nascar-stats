@@ -204,7 +204,7 @@ def get_user_lineup(conn, cfg):
     total_salary = sum(d["salary"] for d in drivers)
     driver_pts   = round(sum(d["pts"] for d in drivers), 1)
     team_bonus   = get_team_bonus_total(conn, USER_TEAM, track_ids, yr)
-    total_pts    = round(driver_pts + team_bonus, 1)
+    total_pts    = driver_pts   # team bonus shown separately; not baked into score
 
     ph = ",".join("?" * len(track_ids))
     races_done = conn.execute(
@@ -274,7 +274,7 @@ def get_prev_lineup(conn, cfg):
         "total_salary": sum(d["salary"] for d in drivers),
         "driver_pts":   driver_pts,
         "team_bonus":   team_bonus,
-        "total_pts":    round(driver_pts + team_bonus, 1),
+        "total_pts":    driver_pts,  # team bonus shown separately; not baked into score
         "segment":      prev_seg,
         "track_ids":    track_ids,
     }
