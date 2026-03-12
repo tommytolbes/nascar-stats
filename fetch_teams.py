@@ -13,7 +13,7 @@ easily parseable.  Update TEAMS_BY_SEGMENT when a new segment loads.
 
 import sqlite3
 import sys
-from difflib import SequenceMatcher
+from utils import match_driver
 
 DB_FILE = "nascar.db"
 
@@ -82,24 +82,6 @@ def setup_tables(conn):
         );
     """)
     conn.commit()
-
-# ── Driver name matcher (same logic as load_segment.py) ───────────────────────
-
-def _similarity(a, b):
-    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
-
-
-def match_driver(scraped_name, all_drivers, threshold=0.78):
-    best_id, best_name, best_score = None, None, 0.0
-    for driver_id, display_name in all_drivers:
-        score = _similarity(scraped_name, display_name)
-        if score > best_score:
-            best_score = score
-            best_id    = driver_id
-            best_name  = display_name
-    if best_score >= threshold:
-        return best_id, best_name, best_score
-    return None
 
 # ── Load teams into DB ─────────────────────────────────────────────────────────
 

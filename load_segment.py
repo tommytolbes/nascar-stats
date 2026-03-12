@@ -20,7 +20,7 @@ import json
 import re
 import os
 from html.parser import HTMLParser
-from difflib import SequenceMatcher
+from utils import match_driver
 
 DB_FILE    = "nascar.db"
 CONFIG_FILE = "segment.json"
@@ -84,31 +84,6 @@ def scrape_salaries():
             results.append((name, price))
 
     return results
-
-
-# ── Driver name matcher ────────────────────────────────────────────────────────
-
-def similarity(a, b):
-    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
-
-
-def match_driver(conn, scraped_name, all_drivers):
-    """
-    Find the best matching driver in the DB for a scraped name.
-    Returns (driver_id, display_name, score) or None.
-    """
-    best_id, best_name, best_score = None, None, 0.0
-
-    for driver_id, display_name in all_drivers:
-        score = similarity(scraped_name, display_name)
-        if score > best_score:
-            best_score = score
-            best_id    = driver_id
-            best_name  = display_name
-
-    if best_score >= 0.78:
-        return best_id, best_name, best_score
-    return None
 
 
 # ── Track picker ───────────────────────────────────────────────────────────────
@@ -243,7 +218,7 @@ def main():
     unmatched = []
 
     for scraped_name, salary in raw:
-        result = match_driver(conn, scraped_name, all_drivers)
+        result = match_driver(scraped_name, all_drivers)
         if result:
             driver_id, db_name, score = result
             matched.append((driver_id, salary, scraped_name, db_name))
