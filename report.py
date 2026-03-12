@@ -16,7 +16,6 @@ DB_FILE     = "nascar.db"
 CONFIG_FILE = "segment.json"
 OUTPUT_FILE = "index.html"
 
-USER_TEAM     = "Thomas Tolbert"
 STANDINGS_URL = "https://www.braswellsfantasynascar.com/standings.html"
 STANDINGS_TTL = 6 * 3600
 
@@ -30,7 +29,11 @@ def load_config():
         "track_ids":   [1, 18, 253, 16],
         "track_names": ["Daytona International Speedway", "Atlanta Motor Speedway",
                         "Circuit of the Americas", "Phoenix International Raceway"],
+        "user_team":   "Thomas Tolbert",
     }
+
+cfg         = load_config()
+USER_TEAM   = cfg.get("user_team", "Thomas Tolbert")
 
 
 def q(conn, sql, params=()):

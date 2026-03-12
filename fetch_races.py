@@ -29,21 +29,19 @@ BASE       = "http://sports.core.api.espn.com/v2/sports/racing/leagues/nascar-pr
 # ── API helpers ────────────────────────────────────────────────────────────────
 
 def get(url):
-    """GET with one retry."""
-    try:
-        r = requests.get(url, timeout=15)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        print(f"    [retry] {e}")
-        time.sleep(2)
+    """GET with exponential backoff — up to 3 retries (1s, 2s, 4s)."""
+    for attempt in range(4):
         try:
             r = requests.get(url, timeout=15)
             r.raise_for_status()
             return r.json()
-        except Exception as e2:
-            print(f"    [failed] {e2}")
-            return None
+        except Exception as e:
+            if attempt == 3:
+                print(f"    [failed after 4 attempts] {e}")
+                return None
+            wait = 2 ** attempt  # 1s, 2s, 4s
+            print(f"    [retry {attempt + 1}/3 in {wait}s] {e}")
+            time.sleep(wait)
 
 def get_all_pages(base_url):
     """Fetch all pages of a paginated ESPN endpoint."""
@@ -77,12 +75,13 @@ def extract_stat(categories, stat_name):
 def setup_tables(conn):
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS tracks (
-            id        INTEGER PRIMARY KEY,
-            full_name TEXT,
-            city      TEXT,
-            state     TEXT,
-            length    REAL,
-            shape     TEXT
+            id         INTEGER PRIMARY KEY,
+            full_name  TEXT,
+            city       TEXT,
+            state      TEXT,
+            length     REAL,
+            shape      TEXT,
+            track_type TEXT
         );
 
         CREATE TABLE IF NOT EXISTS races (
@@ -135,16 +134,30 @@ def fetch_venue(conn, venue_ref, venue_cache):
     if not data or "error" in data:
         return None
 
+    shape = data.get("shape") or ""
+    shape_lower = shape.lower()
+    if "super" in shape_lower or shape_lower.strip() in ("ss", "super speedway"):
+        track_type = "superspeedway"
+    elif "road" in shape_lower or "street" in shape_lower:
+        track_type = "road_course"
+    elif "short" in shape_lower:
+        track_type = "short_track"
+    elif "intermediate" in shape_lower or "oval" in shape_lower:
+        track_type = "intermediate"
+    else:
+        track_type = None
+
     conn.execute("""
-        INSERT OR IGNORE INTO tracks (id, full_name, city, state, length, shape)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT OR IGNORE INTO tracks (id, full_name, city, state, length, shape, track_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (
         venue_id,
         data.get("fullName"),
         data.get("address", {}).get("city"),
         data.get("address", {}).get("state"),
         data.get("length"),
-        data.get("shape"),
+        shape,
+        track_type,
     ))
     conn.commit()
     venue_cache.add(venue_id)

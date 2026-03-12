@@ -28,21 +28,19 @@ PAUSE      = 0.3   # seconds between API calls - be polite to ESPN's servers
 BASE = "http://sports.core.api.espn.com/v2/sports/racing/leagues/nascar-premier"
 
 def get(url):
-    """Make a GET request and return JSON. Retries once on failure."""
-    try:
-        r = requests.get(url, timeout=15)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        print(f"    [retry] {e}")
-        time.sleep(2)
+    """Make a GET request and return JSON. Retries up to 3x with exponential backoff."""
+    for attempt in range(4):
         try:
             r = requests.get(url, timeout=15)
             r.raise_for_status()
             return r.json()
-        except Exception as e2:
-            print(f"    [failed] {e2}")
-            return None
+        except Exception as e:
+            if attempt == 3:
+                print(f"    [failed after 4 attempts] {e}")
+                return None
+            wait = 2 ** attempt  # 1s, 2s, 4s
+            print(f"    [retry {attempt + 1}/3 in {wait}s] {e}")
+            time.sleep(wait)
 
 def get_standings(year):
     """Fetch the full standings list for a given year."""
