@@ -56,7 +56,7 @@ QUAL_PTS = {
 }
 
 RACE_LEADER_BONUS = 100   # most laps led in race
-QUAL_LEADER_BONUS  = 25   # pole sitter (start_pos = 1)
+QUAL_LEADER_BONUS  = 0    # pole sitter bonus — league does not award this
 
 # ── 2026 Segment 1 driver salaries (Daytona 500 / Atlanta / COTA / Phoenix) ───
 # Names must match display_name in the drivers table (case-insensitive lookup).
