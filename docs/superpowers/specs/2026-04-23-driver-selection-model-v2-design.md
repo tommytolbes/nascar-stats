@@ -31,6 +31,8 @@ Four files with separated responsibilities:
   "K": 10,
   "n_simulations": 10000,
   "random_seed": 42,
+  "n_prefilter": 20,
+  "min_bootstrap_samples": 3,
   "trend_short_H": 4,
   "trend_long_H": 12,
   "trend_z_threshold": 1.0,
@@ -101,7 +103,7 @@ $$\sigma^2 = \frac{\sum W_i \cdot (s_i - \bar{x})^2}{\sum W_i}$$
 
 ### Pre-filter
 
-Before simulating, filter to the top 20 drivers by `P_final / Salary` (efficiency), not raw `P_final`. Filtering by efficiency preserves low-salary, high-ceiling "punt" drivers who are essential to fitting elite drivers under the salary cap.
+Before simulating, filter to the top `n_prefilter` drivers (default: 20, stored in `params.json`) by `P_final / Salary` (efficiency), not raw `P_final`. Filtering by efficiency preserves low-salary, high-ceiling "punt" drivers who are essential to fitting elite drivers under the salary cap.
 
 ### Sampling method
 
@@ -115,6 +117,8 @@ sampled = np.random.choice(scores, p=probs)
 ```
 
 Bootstrap resampling is used instead of parametric (normal) sampling to preserve the real shape of each driver's distribution, including heavy left tails from DNFs and crashes.
+
+**Minimum sample size:** A driver with fewer than `min_bootstrap_samples` historical scores (default: 3, stored in `params.json`) has an insufficient distribution to resample meaningfully. Such drivers are excluded from the Monte Carlo pre-filter pool entirely. They remain visible in the other query.py reporting sections (recent form, track history) but do not appear in optimizer combos.
 
 ### Simulation loop
 
@@ -138,7 +142,7 @@ High Mean + low Quality = tournament/GPP lineup (boom-or-bust).
 ### Output format
 
 ```
-#1  Quality: 6.1  |  Mean: 412  |  Std: 68  |  Floor: 301  |  Ceil: 521  |  $95
+#1  Quality: 6.1  |  Mean: 412  |  Std: 68  |  Floor: 301  |  Ceil: 521  |  $95 (illustrative)
     Hamlin / Byron / Chastain ⚠️ / Dillon  —  $27+$33+$30+$5
 ```
 
@@ -172,14 +176,14 @@ $$\Delta Z = Z_{current} - Z_{previous}$$
 |---|---|
 | z > `trend_z_threshold` | 🔥 Hot streak |
 | z < −`trend_z_threshold` | ❄️ Slump |
-| ΔZ > 0 | ↑ Accelerating |
-| ΔZ < 0 | ↓ Worsening |
-| ΔZ ≈ 0 | Stabilizing |
+| ΔZ > +0.1 | ↑ Accelerating |
+| ΔZ < −0.1 | ↓ Worsening |
+| −0.1 ≤ ΔZ ≤ +0.1 | Stabilizing |
 | z > `fade_z_threshold` | ⚠ FADE RISK |
 
 ### Output format
 
-Shown as a dedicated section in `query.py` output, before the optimizer:
+Shown as a dedicated section in `query.py` output, before the optimizer. If no drivers cross `trend_z_threshold` in either direction, the section prints `(no trend alerts this week)` rather than being omitted — so the user knows the section ran and produced a clean result.
 
 ```
 Trend Alerts (Last ~4 races vs. baseline)
