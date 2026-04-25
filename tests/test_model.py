@@ -225,3 +225,62 @@ def test_monte_carlo_zero_weight_raises():
     drivers[2]["weights_all"] = [0.0] * len(drivers[2]["weights_all"])
     with pytest.raises(ValueError, match="Driver"):
         model.run_monte_carlo(drivers, n_simulations=100, random_seed=42)
+
+
+def make_races_for_trend(recent_scores, older_scores):
+    """Build a race list where recent scores have low delta_r, older have high delta_r."""
+    races = []
+    for i, score in enumerate(recent_scores):
+        races.append({"score": score, "track_type": "intermediate",
+                      "delta_r": i, "N": 0})
+    for j, score in enumerate(older_scores):
+        races.append({"score": score, "track_type": "intermediate",
+                      "delta_r": len(recent_scores) + j, "N": 0})
+    return races
+
+def test_trend_hot_streak():
+    """Driver scoring higher recently than baseline has positive z."""
+    recent = [300.0] * 4    # recent: high
+    older  = [100.0] * 10   # baseline: low
+    races = make_races_for_trend(recent, older)
+    result = model.compute_trend(races, trend_short_H=4, trend_long_H=12, phi=0.7)
+    assert result["z"] > 0  # hot driver has positive z
+
+def test_trend_slump():
+    """Driver scoring lower recently than baseline has negative z."""
+    recent = [50.0] * 4
+    older  = [250.0] * 10
+    races = make_races_for_trend(recent, older)
+    result = model.compute_trend(races, trend_short_H=4, trend_long_H=12, phi=0.7)
+    assert result["z"] < 0  # slumping driver has negative z
+
+def test_trend_z_crosses_threshold_with_strong_signal():
+    """With a very short H, a clear step-change drives z above the flag threshold."""
+    recent = [300.0] * 4
+    older  = [100.0] * 10
+    races = make_races_for_trend(recent, older)
+    # trend_short_H=1 focuses almost entirely on the most recent race
+    result = model.compute_trend(races, trend_short_H=1, trend_long_H=30, phi=0.7)
+    assert result["z"] > 1.0
+
+def test_trend_hot_beats_slump():
+    """Hot driver always has higher z than slumped driver."""
+    hot_races   = make_races_for_trend([300.0] * 4, [100.0] * 10)
+    slump_races = make_races_for_trend([100.0] * 4, [300.0] * 10)
+    hot   = model.compute_trend(hot_races,   trend_short_H=4, trend_long_H=12, phi=0.7)
+    slump = model.compute_trend(slump_races, trend_short_H=4, trend_long_H=12, phi=0.7)
+    assert hot["z"] > slump["z"]
+
+def test_trend_delta_z():
+    """delta_z is computed and is a float."""
+    races = make_races_for_trend([200.0] * 4, [150.0] * 10)
+    result = model.compute_trend(races, trend_short_H=4, trend_long_H=12, phi=0.7)
+    assert isinstance(result["delta_z"], float)
+
+def test_trend_insufficient_data():
+    """Returns None when fewer than 2 races exist."""
+    result = model.compute_trend(
+        [{"score": 100.0, "track_type": "x", "delta_r": 0, "N": 0}],
+        trend_short_H=4, trend_long_H=12, phi=0.7
+    )
+    assert result is None
