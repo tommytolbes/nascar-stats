@@ -173,3 +173,45 @@ def test_score_driver_insufficient_data():
     """Driver with no scores returns None."""
     result = model.score_driver([], target_type="intermediate", H=10, phi=0.7, K=10)
     assert result is None
+
+
+def make_driver_scores(n_drivers=5):
+    """Return a list of driver dicts for Monte Carlo testing."""
+    drivers = []
+    for i in range(n_drivers):
+        scores  = [100.0 + i * 10] * 5
+        weights = [1.0] * 5
+        drivers.append({
+            "name":        f"Driver {i}",
+            "salary":      20 + i,
+            "p_final":     100.0 + i * 10,
+            "scores_all":  scores,
+            "weights_all": weights,
+        })
+    return drivers
+
+def test_monte_carlo_returns_combos():
+    drivers = make_driver_scores(5)
+    results = model.run_monte_carlo(drivers, n_simulations=100, random_seed=42)
+    assert len(results) > 0
+    assert "mean" in results[0]
+    assert "std" in results[0]
+    assert "floor" in results[0]
+    assert "ceiling" in results[0]
+    assert "quality" in results[0]
+    assert "combo" in results[0]
+
+def test_monte_carlo_salary_cap():
+    """No combo in results should exceed $100 total salary."""
+    drivers = make_driver_scores(8)
+    results = model.run_monte_carlo(drivers, n_simulations=100, random_seed=42)
+    for r in results:
+        total = sum(d["salary"] for d in r["combo"])
+        assert total <= 100
+
+def test_monte_carlo_reproducible():
+    """Same seed → same top combo mean."""
+    drivers = make_driver_scores(6)
+    r1 = model.run_monte_carlo(drivers, n_simulations=200, random_seed=42)
+    r2 = model.run_monte_carlo(drivers, n_simulations=200, random_seed=42)
+    assert r1[0]["mean"] == pytest.approx(r2[0]["mean"])

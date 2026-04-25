@@ -202,3 +202,81 @@ def score_driver(races: list, target_type: str,
         "scores_all":   all_scores,
         "weights_all":  all_weights,
     }
+
+
+def run_monte_carlo(drivers: list, n_simulations: int,
+                    random_seed: int, salary_cap: int = 100) -> list:
+    """
+    Run Monte Carlo simulation to rank 4-driver combos.
+
+    Args:
+        drivers:       List of dicts, each with keys:
+                         name, salary, p_final, scores_all, weights_all
+        n_simulations: Number of simulation iterations.
+        random_seed:   RNG seed for reproducibility.
+        salary_cap:    Maximum combined salary (default 100).
+
+    Returns:
+        List of combo result dicts sorted by mean descending:
+        [
+            {
+                "mean":    float,
+                "std":     float,
+                "floor":   float,   # 10th percentile
+                "ceiling": float,   # 90th percentile
+                "quality": float,   # mean / std (Sharpe ratio)
+                "combo":   [driver_dict, ...],  # 4 driver dicts
+            },
+            ...
+        ]
+    """
+    np.random.seed(random_seed)
+
+    # Pre-build sampling distributions per driver
+    sampling = []
+    for d in drivers:
+        w = np.array(d["weights_all"], dtype=float)
+        w /= w.sum()
+        sampling.append((d, np.array(d["scores_all"], dtype=float), w))
+
+    # All valid combos under cap
+    valid_combos = [
+        combo for combo in itertools.combinations(range(len(drivers)), 4)
+        if sum(drivers[i]["salary"] for i in combo) <= salary_cap
+    ]
+
+    if not valid_combos:
+        return []
+
+    # Accumulate simulated totals per combo index
+    totals = {c: [] for c in valid_combos}
+
+    for _ in range(n_simulations):
+        # Sample one score per driver
+        sampled = [
+            float(np.random.choice(scores, p=probs))
+            for _, scores, probs in sampling
+        ]
+        for combo in valid_combos:
+            totals[combo].append(sum(sampled[i] for i in combo))
+
+    # Compute statistics per combo
+    results = []
+    for combo, sims in totals.items():
+        arr = np.array(sims)
+        mean    = float(arr.mean())
+        std     = float(arr.std())
+        floor   = float(np.percentile(arr, 10))
+        ceiling = float(np.percentile(arr, 90))
+        quality = round(mean / std, 2) if std > 0 else 0.0
+        results.append({
+            "mean":    round(mean, 1),
+            "std":     round(std, 1),
+            "floor":   round(floor, 1),
+            "ceiling": round(ceiling, 1),
+            "quality": quality,
+            "combo":   [drivers[i] for i in combo],
+        })
+
+    results.sort(key=lambda x: x["mean"], reverse=True)
+    return results
