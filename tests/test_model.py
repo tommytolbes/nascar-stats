@@ -218,3 +218,10 @@ def test_monte_carlo_reproducible():
     r1 = model.run_monte_carlo(drivers, n_simulations=200, random_seed=42)
     r2 = model.run_monte_carlo(drivers, n_simulations=200, random_seed=42)
     assert r1[0]["mean"] == pytest.approx(r2[0]["mean"])
+
+def test_monte_carlo_zero_weight_raises():
+    """Driver with all-zero weights should raise ValueError."""
+    drivers = make_driver_scores(5)
+    drivers[2]["weights_all"] = [0.0] * len(drivers[2]["weights_all"])
+    with pytest.raises(ValueError, match="Driver"):
+        model.run_monte_carlo(drivers, n_simulations=100, random_seed=42)
