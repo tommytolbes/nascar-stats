@@ -376,7 +376,7 @@ def _print_trend_alerts(trend_results: list, z_threshold: float,
         if z > fade_threshold:
             streak = "🔥⚠ "
             extra  = "  FADE RISK"
-        elif z > z_threshold:
+        elif z >= z_threshold:
             streak = "🔥 "
             extra  = ""
         else:
