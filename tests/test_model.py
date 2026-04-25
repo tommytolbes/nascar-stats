@@ -126,3 +126,50 @@ def test_fetch_driver_history_season_N(tmp_path):
     assert races["r3"]["N"] == 0
     assert races["r1"]["N"] == 1
     assert races["r2"]["N"] == 1
+
+
+def test_score_driver_general_only():
+    """With zero track-specific starts, result equals general decay-weighted avg."""
+    races = [
+        {"score": 100.0, "track_type": "intermediate", "delta_r": 0, "N": 0},
+        {"score": 200.0, "track_type": "intermediate", "delta_r": 5, "N": 0},
+    ]
+    # target_type="road_course" so n_specific=0 → alpha=0 → P_final = x_general
+    result = model.score_driver(
+        races, target_type="road_course",
+        H=10, phi=0.7, K=10
+    )
+    assert result["alpha"] == pytest.approx(0.0)
+    assert result["p_final"] == pytest.approx(result["x_general"])
+
+def test_score_driver_full_specialist():
+    """With n >= K starts, alpha == 1 and P_final equals x_specific."""
+    races = [
+        {"score": 150.0, "track_type": "superspeedway", "delta_r": i, "N": 0}
+        for i in range(10)
+    ]
+    result = model.score_driver(
+        races, target_type="superspeedway",
+        H=10, phi=0.7, K=10
+    )
+    assert result["alpha"] == pytest.approx(1.0)
+    assert result["p_final"] == pytest.approx(result["x_specific"])
+
+def test_score_driver_variance_includes_mixture_term():
+    """Variance should be >= weighted avg of component variances when means differ."""
+    races = (
+        [{"score": 300.0, "track_type": "superspeedway", "delta_r": i, "N": 0} for i in range(5)] +
+        [{"score": 50.0,  "track_type": "intermediate",  "delta_r": i + 5, "N": 0} for i in range(5)]
+    )
+    result = model.score_driver(
+        races, target_type="superspeedway",
+        H=10, phi=0.7, K=10
+    )
+    # When means differ, mixture variance > plain weighted variance
+    plain = result["alpha"] * result["var_specific"] + (1 - result["alpha"]) * result["var_general"]
+    assert result["var_final"] >= plain - 1e-9  # >= with float tolerance
+
+def test_score_driver_insufficient_data():
+    """Driver with no scores returns None."""
+    result = model.score_driver([], target_type="intermediate", H=10, phi=0.7, K=10)
+    assert result is None

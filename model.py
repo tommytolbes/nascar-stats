@@ -133,3 +133,72 @@ def fetch_driver_history(conn, yr: int, seg: int) -> dict:
         }
 
     return result
+
+
+def _weighted_mean_var(scores: list, weights: list) -> tuple:
+    """Return (weighted_mean, weighted_variance) for parallel lists."""
+    w = np.array(weights, dtype=float)
+    s = np.array(scores, dtype=float)
+    w_sum = w.sum()
+    if w_sum == 0:
+        return 0.0, 0.0
+    mean = (w * s).sum() / w_sum
+    var  = (w * (s - mean) ** 2).sum() / w_sum
+    return float(mean), float(var)
+
+
+def score_driver(races: list, target_type: str,
+                 H: float, phi: float, K: int) -> dict | None:
+    """
+    Compute blended prior projection for one driver.
+
+    Args:
+        races:       List of race dicts from fetch_driver_history().
+        target_type: Track type for the upcoming segment (e.g. "intermediate").
+        H, phi, K:   Hyperparameters from params.json.
+
+    Returns:
+        Dict with keys: alpha, x_specific, x_general, var_specific,
+                        var_general, var_final, p_final, weights_all, scores_all.
+        Returns None if driver has no historical scores at all.
+    """
+    if not races:
+        return None
+
+    all_scores  = []
+    all_weights = []
+    spec_scores  = []
+    spec_weights = []
+
+    for r in races:
+        w = decay_weight(r["delta_r"], r["N"], H, phi)
+        all_scores.append(r["score"])
+        all_weights.append(w)
+        if r["track_type"] == target_type:
+            spec_scores.append(r["score"])
+            spec_weights.append(w)
+
+    x_gen, var_gen   = _weighted_mean_var(all_scores, all_weights)
+    x_spec, var_spec = _weighted_mean_var(spec_scores, spec_weights) if spec_scores else (x_gen, var_gen)
+
+    n     = len(spec_scores)
+    alpha = min(1.0, n / K)
+
+    p_final  = alpha * x_spec + (1 - alpha) * x_gen
+    var_final = (
+        alpha * var_spec
+        + (1 - alpha) * var_gen
+        + alpha * (1 - alpha) * (x_spec - x_gen) ** 2
+    )
+
+    return {
+        "alpha":        alpha,
+        "x_specific":   x_spec,
+        "x_general":    x_gen,
+        "var_specific": var_spec,
+        "var_general":  var_gen,
+        "var_final":    var_final,
+        "p_final":      p_final,
+        "scores_all":   all_scores,
+        "weights_all":  all_weights,
+    }
