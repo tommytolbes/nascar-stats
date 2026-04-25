@@ -110,6 +110,9 @@ def test_fetch_driver_history_returns_scores(tmp_path):
     # Driver 1 has 3 scores; Driver 2 has none
     assert 1 in history
     assert len(history[1]["scores"]) == 3
+    # Driver 2 is salaried but has no results — should appear with empty lists
+    assert 2 in history
+    assert history[2]["scores"] == []
 
 def test_fetch_driver_history_delta_r(tmp_path):
     conn = make_test_db(tmp_path)

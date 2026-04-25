@@ -236,7 +236,10 @@ def run_monte_carlo(drivers: list, n_simulations: int,
     sampling = []
     for d in drivers:
         w = np.array(d["weights_all"], dtype=float)
-        w /= w.sum()
+        w_sum = w.sum()
+        if w_sum == 0:
+            raise ValueError(f"Driver '{d['name']}' has all-zero weights — cannot sample")
+        w /= w_sum
         sampling.append((d, np.array(d["scores_all"], dtype=float), w))
 
     # All valid combos under cap
@@ -248,26 +251,20 @@ def run_monte_carlo(drivers: list, n_simulations: int,
     if not valid_combos:
         return []
 
-    # Accumulate simulated totals per combo index
-    totals = {c: [] for c in valid_combos}
+    # Generate all samples at once: shape (n_simulations, n_drivers)
+    all_sampled = np.column_stack([
+        np.random.choice(scores, size=n_simulations, p=probs)
+        for _, scores, probs in sampling
+    ])
 
-    for _ in range(n_simulations):
-        # Sample one score per driver
-        sampled = [
-            float(np.random.choice(scores, p=probs))
-            for _, scores, probs in sampling
-        ]
-        for combo in valid_combos:
-            totals[combo].append(sum(sampled[i] for i in combo))
-
-    # Compute statistics per combo
+    # Compute stats per combo using array slicing
     results = []
-    for combo, sims in totals.items():
-        arr = np.array(sims)
-        mean    = float(arr.mean())
-        std     = float(arr.std())
-        floor   = float(np.percentile(arr, 10))
-        ceiling = float(np.percentile(arr, 90))
+    for combo in valid_combos:
+        combo_totals = all_sampled[:, list(combo)].sum(axis=1)
+        mean    = float(combo_totals.mean())
+        std     = float(combo_totals.std())
+        floor   = float(np.percentile(combo_totals, 10))
+        ceiling = float(np.percentile(combo_totals, 90))
         quality = round(mean / std, 2) if std > 0 else 0.0
         results.append({
             "mean":    round(mean, 1),
