@@ -277,3 +277,224 @@ def run_monte_carlo(drivers: list, n_simulations: int,
 
     results.sort(key=lambda x: x["mean"], reverse=True)
     return results
+
+
+def compute_trend(races: list, trend_short_H: float, trend_long_H: float,
+                  phi: float) -> dict | None:
+    """
+    Compute trend z-score and momentum velocity for one driver.
+
+    Uses all races (general pool only — track type ignored) with two
+    different half-lives to detect hot streaks and slumps.
+
+    Args:
+        races:          Race dicts from fetch_driver_history().
+        trend_short_H:  Half-life for "current form" window.
+        trend_long_H:   Half-life for "baseline" window.
+        phi:            Season boundary penalty (same as main model).
+
+    Returns:
+        Dict with: z, delta_z, x_short, x_long, sigma_general
+        Returns None if fewer than 2 races.
+    """
+    if len(races) < 2:
+        return None
+
+    def weighted_avg(races_list, H):
+        scores  = [r["score"] for r in races_list]
+        weights = [decay_weight(r["delta_r"], r["N"], H, phi) for r in races_list]
+        mean, _ = _weighted_mean_var(scores, weights)
+        return mean
+
+    x_short = weighted_avg(races, trend_short_H)
+    x_long  = weighted_avg(races, trend_long_H)
+
+    # General weighted variance (using long H as baseline)
+    scores  = [r["score"] for r in races]
+    weights = [decay_weight(r["delta_r"], r["N"], trend_long_H, phi) for r in races]
+    _, var_general = _weighted_mean_var(scores, weights)
+    sigma_general  = float(np.sqrt(var_general)) if var_general > 0 else 1.0
+
+    z = (x_short - x_long) / sigma_general
+
+    # delta_z: re-compute z excluding the single most recent race
+    races_prev = [r for r in races if r["delta_r"] > 0]
+    if len(races_prev) >= 2:
+        x_short_prev = weighted_avg(races_prev, trend_short_H)
+        x_long_prev  = weighted_avg(races_prev, trend_long_H)
+        scores_prev  = [r["score"] for r in races_prev]
+        weights_prev = [decay_weight(r["delta_r"] - 1, r["N"], trend_long_H, phi)
+                        for r in races_prev]
+        _, var_prev = _weighted_mean_var(scores_prev, weights_prev)
+        sigma_prev  = float(np.sqrt(var_prev)) if var_prev > 0 else 1.0
+        z_prev  = (x_short_prev - x_long_prev) / sigma_prev
+    else:
+        z_prev = z
+
+    delta_z = z - z_prev
+
+    return {
+        "z":             round(z, 2),
+        "delta_z":       round(delta_z, 2),
+        "x_short":       round(x_short, 1),
+        "x_long":        round(x_long, 1),
+        "sigma_general": round(sigma_general, 1),
+    }
+
+
+def _print_trend_alerts(trend_results: list, z_threshold: float,
+                        fade_threshold: float) -> set:
+    """
+    Print trend alert section. Returns set of driver names with active alerts.
+
+    Args:
+        trend_results: List of dicts with keys: name, z, delta_z, x_short, x_long
+        z_threshold:   Minimum |z| to trigger a flag.
+        fade_threshold: z above which a FADE RISK warning is added.
+
+    Returns:
+        Set of driver names that are flagged (for inline warning in optimizer output).
+    """
+    W = 55
+    print(f"\n{'-'*W}")
+    print(f"  Trend Alerts (Last ~4 races vs. baseline)")
+    print(f"{'-'*W}")
+
+    flagged_names = set()
+    any_alerts = False
+
+    for t in trend_results:
+        z, dz = t["z"], t["delta_z"]
+        name  = t["name"]
+
+        if abs(z) < z_threshold:
+            continue
+
+        any_alerts = True
+        pts_diff = t["x_short"] - t["x_long"]
+
+        if z > fade_threshold:
+            streak = "🔥⚠ "
+            extra  = "  FADE RISK"
+        elif z > z_threshold:
+            streak = "🔥 "
+            extra  = ""
+        else:
+            streak = "❄️  "
+            extra  = ""
+
+        if dz > 0.1:
+            direction, motion = "↑", "  ACCELERATING"
+        elif dz < -0.1:
+            direction, motion = "↓", "  WORSENING"
+        else:
+            direction, motion = " ", "  STABILIZING"
+
+        sign = "+" if pts_diff >= 0 else ""
+        print(f"  {streak}{direction} {name:<22} {sign}{pts_diff:.0f} pts"
+              f"  z={z:+.1f}  ΔZ={dz:+.1f}{motion}{extra}")
+        flagged_names.add(name)
+
+    if not any_alerts:
+        print("  (no trend alerts this week)")
+
+    return flagged_names
+
+
+def _print_optimizer_results(results: list, flagged_names: set, top_n: int = 5):
+    """Print Monte Carlo optimizer results."""
+    W = 55
+    print(f"\n{'-'*W}")
+    print(f"  Team Optimizer — Monte Carlo (Top {top_n})")
+    print(f"{'-'*W}")
+
+    if not results:
+        print("  No valid combinations found under $100.")
+        return
+
+    for rank, r in enumerate(results[:top_n], 1):
+        salary    = sum(d["salary"] for d in r["combo"])
+        leftover  = 100 - salary
+        names_out = []
+        for d in r["combo"]:
+            tag = " ⚠️" if d["name"] in flagged_names else ""
+            names_out.append(f"{d['name']}{tag}")
+        costs = " + ".join(f"${d['salary']}" for d in r["combo"])
+        print(f"\n  #{rank}  Quality: {r['quality']}  |  Mean: {r['mean']}  "
+              f"|  Std: {r['std']}  |  Floor: {r['floor']}  "
+              f"|  Ceil: {r['ceiling']}  |  ${salary} total  |  ${leftover} leftover")
+        print(f"       {' / '.join(names_out)}")
+        print(f"       {costs}")
+
+
+def run(conn, yr: int, seg: int, tids: list, params_path: str = PARAMS_FILE):
+    """
+    Entry point called by query.py.
+    Prints trend alerts then Monte Carlo optimizer results.
+
+    Args:
+        conn:        Open sqlite3 connection to nascar.db.
+        yr:          Active segment year (e.g. 2026).
+        seg:         Active segment number (e.g. 3).
+        tids:        List of track IDs for this segment.
+        params_path: Path to params.json (default: PARAMS_FILE).
+    """
+    params = load_config(params_path)
+
+    H              = params["H"]
+    phi            = params["phi"]
+    K              = params["K"]
+    n_simulations  = params["n_simulations"]
+    random_seed    = params["random_seed"]
+    n_prefilter    = params["n_prefilter"]
+    min_samples    = params["min_bootstrap_samples"]
+    trend_short_H  = params["trend_short_H"]
+    trend_long_H   = params["trend_long_H"]
+    z_threshold    = params["trend_z_threshold"]
+    fade_threshold = params["fade_z_threshold"]
+
+    # Determine target track type from the first segment track
+    track_type_row = conn.execute(
+        "SELECT track_type FROM tracks WHERE id = ?", (tids[0],)
+    ).fetchone()
+    target_type = track_type_row[0] if track_type_row else None
+
+    # Fetch all history
+    history = fetch_driver_history(conn, yr, seg)
+
+    # Score each driver
+    scored = {}
+    for driver_id, info in history.items():
+        s = score_driver(info["races"], target_type, H, phi, K)
+        if s is None:
+            continue
+        s["name"]   = info["name"]
+        s["salary"] = info["salary"]
+        scored[driver_id] = s
+
+    # Trend detection
+    trend_results = []
+    for driver_id, info in history.items():
+        t = compute_trend(info["races"], trend_short_H, trend_long_H, phi)
+        if t is None:
+            continue
+        t["name"] = info["name"]
+        trend_results.append(t)
+
+    trend_results.sort(key=lambda x: abs(x["z"]), reverse=True)
+    flagged_names = _print_trend_alerts(trend_results, z_threshold, fade_threshold)
+
+    # Pre-filter: top n_prefilter by efficiency, min samples enforced
+    eligible = [
+        s for s in scored.values()
+        if len(s["scores_all"]) >= min_samples and s["salary"] > 0
+    ]
+    eligible.sort(key=lambda x: x["p_final"] / x["salary"], reverse=True)
+    pool = eligible[:n_prefilter]
+
+    if len(pool) < 4:
+        print(f"\n  (not enough eligible drivers for optimizer — need at least 4, have {len(pool)})")
+        return
+
+    mc_results = run_monte_carlo(pool, n_simulations, random_seed)
+    _print_optimizer_results(mc_results, flagged_names)
