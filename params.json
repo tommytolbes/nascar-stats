@@ -1,0 +1,13 @@
+{
+  "H": 10,
+  "phi": 0.7,
+  "K": 10,
+  "n_simulations": 10000,
+  "random_seed": 42,
+  "n_prefilter": 20,
+  "min_bootstrap_samples": 3,
+  "trend_short_H": 4,
+  "trend_long_H": 12,
+  "trend_z_threshold": 1.0,
+  "fade_z_threshold": 2.0
+}
