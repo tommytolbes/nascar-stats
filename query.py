@@ -10,9 +10,9 @@ Run 'python load_segment.py' at the start of each new segment.
 """
 
 import sqlite3
-import itertools
 import json
 import os
+import model
 
 DB_FILE     = "nascar.db"
 CONFIG_FILE = "segment.json"
@@ -249,7 +249,7 @@ def main():
         """, (yr, seg))
 
     # 15. Team optimizer
-    fantasy_optimizer(conn, yr, seg, tids)
+    model.run(conn, yr, seg, tids)
 
     conn.close()
     print(f"\n{'-'*55}")
@@ -257,60 +257,6 @@ def main():
     print("  (free at sqlitebrowser.org) to browse data visually.")
     print(f"  To load a new segment: python load_segment.py")
     print(f"{'-'*55}\n")
-
-
-def fantasy_optimizer(conn, yr, seg, tids):
-    """Find the top 5 four-driver combos under $100 for the active segment."""
-    print(f"\n{'-'*55}")
-    print(f"  Team Optimizer - Best 4-Driver Combos Under $100")
-    print(f"{'-'*55}")
-
-    placeholders = ",".join("?" * len(tids))
-    rows = conn.execute(f"""
-        WITH seg_tracks AS (
-            SELECT r.id AS race_id
-            FROM races r
-            JOIN tracks t ON t.id = r.track_id
-            WHERE t.id IN ({placeholders})
-        )
-        SELECT
-            d.display_name,
-            ds.salary,
-            ROUND(AVG(fs.total_pts), 1) AS avg_pts
-        FROM fantasy_scores fs
-        JOIN seg_tracks ON seg_tracks.race_id = fs.race_id
-        JOIN drivers d ON d.id = fs.driver_id
-        JOIN driver_salaries ds ON ds.driver_id = fs.driver_id
-            AND ds.year = ? AND ds.segment = ?
-        GROUP BY fs.driver_id
-        HAVING COUNT(*) >= 2
-        ORDER BY avg_pts DESC
-    """, (*tids, yr, seg)).fetchall()
-
-    if not rows:
-        print("  (no data available)")
-        return
-
-    best = []
-    for combo in itertools.combinations(rows, 4):
-        total_salary = sum(c[1] for c in combo)
-        if total_salary > 100:
-            continue
-        total_pts = sum(c[2] for c in combo)
-        best.append((total_pts, total_salary, combo))
-
-    best.sort(reverse=True)
-
-    if not best:
-        print("  No valid combinations found under $100.")
-        return
-
-    for rank, (pts, salary, combo) in enumerate(best[:5], 1):
-        names = " / ".join(c[0] for c in combo)
-        costs = " + ".join(f"${c[1]}" for c in combo)
-        print(f"\n  #{rank}  {round(pts,1)} avg pts  |  ${salary} total  |  ${100-salary} leftover")
-        print(f"       {names}")
-        print(f"       {costs}")
 
 
 if __name__ == "__main__":
