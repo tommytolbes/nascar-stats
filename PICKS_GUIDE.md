@@ -136,25 +136,48 @@ find the top road course performers in this table.
 
 ---
 
-### Section: Team Optimizer — Best 4-Driver Combos Under $100
+### Section: Trend Alerts (Last ~4 races vs. baseline)
 
-> The computer's top 5 recommended teams, ranked by combined historical avg pts.
+> Flags drivers whose recent form has shifted significantly — either hot or cold —
+> compared to their long-run average.
+
+A driver showing as **hot** has been outperforming their own baseline lately.
+A driver showing as **cold (slump)** has been underperforming. If no drivers
+have crossed the threshold, the section reads "(no trend alerts this week)".
+
+**How to use it:** Use this as a tiebreaker. If two drivers look equal on paper
+but one is trending hot, lean toward them. If the optimizer's top pick is in a
+slump, consider the next combo down.
+
+---
+
+### Section: Team Optimizer — Monte Carlo (Top 5)
+
+> The computer's top 5 recommended teams, ranked by simulated quality score
+> that balances expected points, upside, and floor.
 
 Each combo shows:
-- Combined avg fantasy points
-- Total salary and how much budget is left over
-- The 4 drivers and their individual costs
+
+| Field | What it means |
+|---|---|
+| `Quality` | Overall score — higher is better (balances mean, upside, and floor) |
+| `Mean` | Average projected fantasy points for the team |
+| `Std` | Variability — higher means more boom-or-bust |
+| `Floor` | Estimated worst-case score (10th percentile) |
+| `Ceil` | Estimated best-case score (90th percentile) |
 
 **Example output:**
 ```
-  #1  733.5 avg pts  |  $95 total  |  $5 leftover
-       Joey Logano / Ryan Blaney / Chase Elliott / Austin Cindric
-       $27 + $33 + $32 + $3
+  #1  Quality: 3.69  |  Mean: 732.1  |  Std: 198.1  |  Floor: 482.0  |  Ceil: 996.0  |  $100 total  |  $0 leftover
+       Austin Dillon / Carson Hocevar / Tyler Reddick / Denny Hamlin
+       $5 + $19 + $40 + $36
 ```
 
-**How to use it:** The #1 combo is the strongest historically. But use your
-own judgment too — if a driver is injured, in a slump, or switching teams,
-override the computer. The optimizer looks backward; you look forward.
+**How to use it:** The #1 combo has the strongest combination of expected score
+and risk-adjusted upside. If you want a safer floor, pick a combo with a higher
+Floor number. If you want a higher ceiling, look at Ceil. Override the computer
+if a driver is injured, in a confirmed slump (check Trend Alerts), or switching
+teams — the model looks backward; you look forward.
 
 ---
 
@@ -179,6 +202,7 @@ Use this checklist to choose your 4 drivers:
 | Before first race of new segment | Run `python query.py`, make picks |
 | Every Monday at noon | Database updates automatically (no action needed) |
 | Anytime | Run `python query.py` to re-check your thinking |
+| Once per season (optional) | Run `python tune.py` to re-tune the model (takes 5–15 min, then writes updated `params.json`) |
 
 ---
 
