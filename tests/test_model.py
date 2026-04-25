@@ -47,3 +47,25 @@ def test_load_config_missing_key(tmp_path):
 def test_load_config_file_not_found():
     with pytest.raises(FileNotFoundError):
         model.load_config("nonexistent_params.json")
+
+
+def test_decay_weight_most_recent():
+    # Race from 0 races ago, same season: weight should be 1.0
+    w = model.decay_weight(delta_r=0, N=0, H=10, phi=0.7)
+    assert w == pytest.approx(1.0)
+
+def test_decay_weight_half_life():
+    # Race from exactly H races ago, same season: weight should be 0.5
+    w = model.decay_weight(delta_r=10, N=0, H=10, phi=0.7)
+    assert w == pytest.approx(0.5)
+
+def test_decay_weight_season_boundary():
+    # One season boundary crossed applies phi multiplier
+    w_no_boundary = model.decay_weight(delta_r=10, N=0, H=10, phi=0.7)
+    w_boundary    = model.decay_weight(delta_r=10, N=1, H=10, phi=0.7)
+    assert w_boundary == pytest.approx(w_no_boundary * 0.7)
+
+def test_decay_weight_two_seasons():
+    # Two boundaries: phi^2
+    w = model.decay_weight(delta_r=0, N=2, H=10, phi=0.7)
+    assert w == pytest.approx(0.7 ** 2)

@@ -35,3 +35,19 @@ def load_config(path=PARAMS_FILE):
     if missing:
         raise ValueError(f"Missing required params in {path}: {missing}")
     return cfg
+
+
+def decay_weight(delta_r: int, N: int, H: float, phi: float) -> float:
+    """
+    Compute the decay weight for a single historical race result.
+
+    Args:
+        delta_r: Races ago (0 = most recent race on calendar).
+        N:       Number of season boundaries crossed.
+        H:       Half-life in races.
+        phi:     Season boundary penalty (0.5 < phi < 0.9).
+
+    Returns:
+        Weight in (0, 1].
+    """
+    return (0.5 ** (delta_r / H)) * (phi ** N)
