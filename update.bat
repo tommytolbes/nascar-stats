@@ -26,7 +26,16 @@ if errorlevel 1 (
 )
 echo fetch_races OK >> "%LOG%"
 
-echo [2/5] Rebuilding fantasy scores... >> "%LOG%"
+echo [2/5] Loading stage results from PDFs... >> "%LOG%"
+"%PYTHON%" -u process_stages.py >> "%LOG%" 2>&1
+if errorlevel 1 (
+    echo ERROR: process_stages.py failed with code %ERRORLEVEL%. Aborting. >> "%LOG%"
+    echo Update FAILED: %DATE% %TIME% >> "%LOG%"
+    exit /b 1
+)
+echo process_stages OK >> "%LOG%"
+
+echo [3/6] Rebuilding fantasy scores... >> "%LOG%"
 "%PYTHON%" -u build_fantasy.py >> "%LOG%" 2>&1
 if errorlevel 1 (
     echo ERROR: build_fantasy.py failed with code %ERRORLEVEL%. Aborting. >> "%LOG%"
@@ -35,7 +44,7 @@ if errorlevel 1 (
 )
 echo build_fantasy OK >> "%LOG%"
 
-echo [3/5] Generating website... >> "%LOG%"
+echo [4/6] Generating website... >> "%LOG%"
 "%PYTHON%" -u report.py >> "%LOG%" 2>&1
 if errorlevel 1 (
     echo ERROR: report.py failed with code %ERRORLEVEL%. Aborting. >> "%LOG%"
@@ -46,7 +55,7 @@ echo report OK >> "%LOG%"
 
 :: Commit the fresh index.html to the worktree branch first,
 :: then merge that branch into main and push.
-echo [4/5] Committing index.html... >> "%LOG%"
+echo [5/6] Committing index.html... >> "%LOG%"
 git add index.html >> "%LOG%" 2>&1
 git commit -m "Auto-update: %DATE%" >> "%LOG%" 2>&1
 :: exit code 1 from git commit means "nothing to commit" -- that's fine, don't abort
@@ -57,7 +66,7 @@ if errorlevel 2 (
 )
 echo git commit OK >> "%LOG%"
 
-echo [5/5] Merging to main and pushing... >> "%LOG%"
+echo [6/6] Merging to main and pushing... >> "%LOG%"
 git -C "%MAINREPO%" merge --allow-unrelated-histories -m "Auto-update: %DATE%" claude/fervent-maxwell >> "%LOG%" 2>&1
 if errorlevel 1 (
     echo ERROR: git merge failed with code %ERRORLEVEL%. Aborting push. >> "%LOG%"
