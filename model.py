@@ -401,7 +401,8 @@ def _print_trend_alerts(trend_results: list, z_threshold: float,
     return flagged_names
 
 
-def _print_optimizer_results(results: list, flagged_names: set, top_n: int = 5):
+def _print_optimizer_results(results: list, flagged_names: set, top_n: int = 5,
+                             salary_cap: float = 100):
     """Print Monte Carlo optimizer results."""
     W = 55
     print(f"\n{'-'*W}")
@@ -409,12 +410,12 @@ def _print_optimizer_results(results: list, flagged_names: set, top_n: int = 5):
     print(f"{'-'*W}")
 
     if not results:
-        print("  No valid combinations found under $100.")
+        print(f"  No valid combinations found under ${salary_cap}.")
         return
 
     for rank, r in enumerate(results[:top_n], 1):
         salary    = sum(d["salary"] for d in r["combo"])
-        leftover  = 100 - salary
+        leftover  = salary_cap - salary
         names_out = []
         for d in r["combo"]:
             tag = " ⚠️" if d["name"] in flagged_names else ""
@@ -427,7 +428,8 @@ def _print_optimizer_results(results: list, flagged_names: set, top_n: int = 5):
         print(f"       {costs}")
 
 
-def run(conn, yr: int, seg: int, tids: list, params_path: str = PARAMS_FILE):
+def run(conn, yr: int, seg: int, tids: list, params_path: str = PARAMS_FILE,
+        salary_cap: float = 100):
     """
     Entry point called by query.py.
     Prints trend alerts then Monte Carlo optimizer results.
@@ -438,6 +440,7 @@ def run(conn, yr: int, seg: int, tids: list, params_path: str = PARAMS_FILE):
         seg:         Active segment number (e.g. 3).
         tids:        List of track IDs for this segment.
         params_path: Path to params.json (default: PARAMS_FILE).
+        salary_cap:  Maximum combined driver salary (default: 100).
     """
     params = load_config(params_path)
 
@@ -496,5 +499,5 @@ def run(conn, yr: int, seg: int, tids: list, params_path: str = PARAMS_FILE):
         print(f"\n  (not enough eligible drivers for optimizer — need at least 4, have {len(pool)})")
         return
 
-    mc_results = run_monte_carlo(pool, n_simulations, random_seed)
-    _print_optimizer_results(mc_results, flagged_names)
+    mc_results = run_monte_carlo(pool, n_simulations, random_seed, salary_cap)
+    _print_optimizer_results(mc_results, flagged_names, salary_cap=salary_cap)

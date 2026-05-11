@@ -1,17 +1,18 @@
 {
   "year": 2026,
-  "segment": 2,
-  "user_team": "Thomas Tolbert",
+  "segment": 4,
+  "salary_cap": 105,
   "track_ids": [
-    20,
-    13,
-    14,
-    12
+    4,
+    49,
+    7,
+    8
   ],
   "track_names": [
-    "Las Vegas Motor Speedway",
-    "Darlington Raceway",
-    "Martinsville Speedway",
-    "Bristol Motor Speedway"
-  ]
+    "Charlotte Motor Speedway",
+    "Nashville Superspeedway",
+    "Michigan International Speedway",
+    "Pocono Raceway"
+  ],
+  "user_team": "Thomas Tolbert"
 }
