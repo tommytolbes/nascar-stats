@@ -34,6 +34,7 @@ def load_config():
 
 cfg         = load_config()
 USER_TEAM   = cfg.get("user_team", "Thomas Tolbert")
+SALARY_CAP  = cfg.get("salary_cap", 100)
 
 
 def q(conn, sql, params=()):
@@ -673,7 +674,7 @@ def segment_intelligence_html(user, prev, optimal_prev, standings, cfg):
             + '<div class="intel-meta">points through ' + str(user["races_done"])
             + " of " + str(user["total_races"]) + " races"
             + " &nbsp;&bull;&nbsp; $" + _fmt(user["total_salary"]) + " salary"
-            + " &nbsp;&bull;&nbsp; $" + _fmt(100 - user["total_salary"]) + " remaining cap"
+            + " &nbsp;&bull;&nbsp; $" + _fmt(SALARY_CAP - user["total_salary"]) + " remaining cap"
             + bonus_line + "</div>"
         )
     parts.append("</div>")
