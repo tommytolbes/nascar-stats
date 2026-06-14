@@ -46,14 +46,15 @@ def q(conn, sql, params=()):
 def setup_segment_tables(conn):
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS segment_lineups (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            year      INTEGER NOT NULL,
-            segment   INTEGER NOT NULL,
-            driver_1  INTEGER,
-            driver_2  INTEGER,
-            driver_3  INTEGER,
-            driver_4  INTEGER,
-            track_ids TEXT,
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            year       INTEGER NOT NULL,
+            segment    INTEGER NOT NULL,
+            driver_1   INTEGER,
+            driver_2   INTEGER,
+            driver_3   INTEGER,
+            driver_4   INTEGER,
+            track_ids  TEXT,
+            salary_cap INTEGER DEFAULT 100,
             UNIQUE(year, segment)
         );
         CREATE TABLE IF NOT EXISTS segment_optimal_lineups (
@@ -69,6 +70,12 @@ def setup_segment_tables(conn):
             behind TEXT, weekly TEXT, last_week TEXT, last_updated TEXT
         );
     """)
+    # Schema migration: add salary_cap column if it doesn't exist yet
+    try:
+        conn.execute("ALTER TABLE segment_lineups ADD COLUMN salary_cap INTEGER DEFAULT 100")
+        conn.commit()
+    except Exception:
+        pass
     conn.commit()
 
 
@@ -319,6 +326,13 @@ def get_or_compute_optimal(conn, year, segment, track_ids):
     if not track_ids:
         return None
 
+    # Look up the salary cap for this specific segment
+    cap_row = conn.execute(
+        "SELECT COALESCE(salary_cap, 100) FROM segment_lineups WHERE year=? AND segment=?",
+        (year, segment)
+    ).fetchone()
+    salary_cap = cap_row[0] if cap_row else 100
+
     cached = conn.execute(
         "SELECT driver_1, driver_2, driver_3, driver_4, salary_total, segment_points"
         " FROM segment_optimal_lineups WHERE year = ? AND segment = ?",
@@ -367,7 +381,7 @@ def get_or_compute_optimal(conn, year, segment, track_ids):
     best = None
     for combo in itertools.combinations(rows, 4):
         total_sal = sum(c[2] for c in combo)
-        if total_sal > 100:
+        if total_sal > salary_cap:
             continue
         total_pts = sum(c[3] for c in combo)
         if best is None or total_pts > best["total_pts"]:

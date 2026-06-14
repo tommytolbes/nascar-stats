@@ -17,7 +17,7 @@ echo ======================================== >> "%LOG%"
 cd /d "%PROJECT%"
 
 :: -u = unbuffered output so every line is written to the log immediately
-echo [1/5] Fetching new race results... >> "%LOG%"
+echo [1/7] Fetching new race results... >> "%LOG%"
 "%PYTHON%" -u fetch_races.py >> "%LOG%" 2>&1
 if errorlevel 1 (
     echo ERROR: fetch_races.py failed with code %ERRORLEVEL%. Aborting. >> "%LOG%"
@@ -26,7 +26,7 @@ if errorlevel 1 (
 )
 echo fetch_races OK >> "%LOG%"
 
-echo [2/5] Loading stage results from PDFs... >> "%LOG%"
+echo [2/7] Loading stage results from PDFs... >> "%LOG%"
 "%PYTHON%" -u process_stages.py >> "%LOG%" 2>&1
 if errorlevel 1 (
     echo ERROR: process_stages.py failed with code %ERRORLEVEL%. Aborting. >> "%LOG%"
@@ -35,7 +35,7 @@ if errorlevel 1 (
 )
 echo process_stages OK >> "%LOG%"
 
-echo [3/6] Rebuilding fantasy scores... >> "%LOG%"
+echo [3/7] Rebuilding fantasy scores... >> "%LOG%"
 "%PYTHON%" -u build_fantasy.py >> "%LOG%" 2>&1
 if errorlevel 1 (
     echo ERROR: build_fantasy.py failed with code %ERRORLEVEL%. Aborting. >> "%LOG%"
@@ -44,7 +44,7 @@ if errorlevel 1 (
 )
 echo build_fantasy OK >> "%LOG%"
 
-echo [4/6] Generating website... >> "%LOG%"
+echo [4/7] Generating website... >> "%LOG%"
 "%PYTHON%" -u report.py >> "%LOG%" 2>&1
 if errorlevel 1 (
     echo ERROR: report.py failed with code %ERRORLEVEL%. Aborting. >> "%LOG%"
@@ -53,9 +53,17 @@ if errorlevel 1 (
 )
 echo report OK >> "%LOG%"
 
+echo [5/7] Backing up database... >> "%LOG%"
+copy /Y "%PROJECT%\nascar.db" "%MAINREPO%\nascar.db.bak" >> "%LOG%" 2>&1
+if errorlevel 1 (
+    echo WARNING: DB backup failed -- continuing anyway. >> "%LOG%"
+) else (
+    echo nascar.db backup OK >> "%LOG%"
+)
+
 :: Commit the fresh index.html to the worktree branch first,
 :: then merge that branch into main and push.
-echo [5/6] Committing index.html... >> "%LOG%"
+echo [6/7] Committing index.html... >> "%LOG%"
 git add index.html >> "%LOG%" 2>&1
 git commit -m "Auto-update: %DATE%" >> "%LOG%" 2>&1
 :: exit code 1 from git commit means "nothing to commit" -- that's fine, don't abort
@@ -66,7 +74,7 @@ if errorlevel 2 (
 )
 echo git commit OK >> "%LOG%"
 
-echo [6/6] Merging to main and pushing... >> "%LOG%"
+echo [7/7] Merging to main and pushing... >> "%LOG%"
 git -C "%MAINREPO%" merge --allow-unrelated-histories -m "Auto-update: %DATE%" claude/fervent-maxwell >> "%LOG%" 2>&1
 if errorlevel 1 (
     echo ERROR: git merge failed with code %ERRORLEVEL%. Aborting push. >> "%LOG%"
