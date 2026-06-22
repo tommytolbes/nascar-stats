@@ -30,6 +30,7 @@ Re-run any time new race data is added -- already-scored races are skipped.
 Usage:   python build_fantasy.py
 """
 
+import datetime
 import json
 import sqlite3
 
@@ -256,6 +257,16 @@ def load_salaries(conn):
 # ── Calculate fantasy scores ───────────────────────────────────────────────────
 
 def calculate_fantasy_scores(conn):
+    # Clear fantasy scores for races in the last 14 days so ESPN corrections are picked up
+    cutoff = (datetime.date.today() - datetime.timedelta(days=14)).isoformat()
+    deleted = conn.execute(
+        "DELETE FROM fantasy_scores WHERE race_id IN (SELECT id FROM races WHERE date >= ?)",
+        (cutoff,)
+    ).rowcount
+    conn.commit()
+    if deleted:
+        print(f"  Cleared {deleted} stale score rows for races since {cutoff} (will recalculate).")
+
     # Find all races that don't yet have fantasy scores calculated
     races = conn.execute("""
         SELECT r.id FROM races r

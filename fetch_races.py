@@ -315,13 +315,17 @@ def main():
         row[0] for row in conn.execute("SELECT id FROM drivers")
     )
 
-    # Races with at least one non-NULL finish_pos are complete - skip on future runs
+    # Skip completed races older than 14 days; always re-fetch recent ones for ESPN corrections
+    cutoff = (datetime.date.today() - datetime.timedelta(days=14)).isoformat()
     done_races = set(
         row[0] for row in conn.execute(
-            "SELECT DISTINCT race_id FROM race_results WHERE finish_pos IS NOT NULL"
+            "SELECT DISTINCT rr.race_id FROM race_results rr"
+            " JOIN races r ON r.id = rr.race_id"
+            " WHERE rr.finish_pos IS NOT NULL AND r.date < ?",
+            (cutoff,)
         )
     )
-    print(f"  Already have complete results for {len(done_races)} races (will skip these).")
+    print(f"  Already have complete results for {len(done_races)} races older than 14 days (will skip).")
 
     venue_cache = set(
         row[0] for row in conn.execute("SELECT id FROM tracks")
