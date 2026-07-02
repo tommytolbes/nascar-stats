@@ -1,18 +1,18 @@
 {
   "year": 2026,
-  "segment": 4,
-  "salary_cap": 105,
+  "segment": 5,
+  "salary_cap": 100,
   "track_ids": [
-    4,
-    49,
-    7,
-    8
+    7115,
+    9,
+    41,
+    18
   ],
   "track_names": [
-    "Charlotte Motor Speedway",
-    "Nashville Superspeedway",
-    "Michigan International Speedway",
-    "Pocono Raceway"
+    "San Diego (Naval Base Coronado)",
+    "Sonoma Raceway",
+    "Chicago",
+    "Atlanta Motor Speedway"
   ],
   "user_team": "Thomas Tolbert"
 }
