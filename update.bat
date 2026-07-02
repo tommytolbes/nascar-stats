@@ -26,14 +26,14 @@ if errorlevel 1 (
 )
 echo fetch_races OK >> "%LOG%"
 
-echo [2/7] Loading stage results from PDFs... >> "%LOG%"
-"%PYTHON%" -u process_stages.py >> "%LOG%" 2>&1
+echo [2/7] Loading stage results from NASCAR API... >> "%LOG%"
+"%PYTHON%" -u fetch_stages_api.py >> "%LOG%" 2>&1
 if errorlevel 1 (
-    echo ERROR: process_stages.py failed with code %ERRORLEVEL%. Aborting. >> "%LOG%"
+    echo ERROR: fetch_stages_api.py failed with code %ERRORLEVEL%. Aborting. >> "%LOG%"
     echo Update FAILED: %DATE% %TIME% >> "%LOG%"
     exit /b 1
 )
-echo process_stages OK >> "%LOG%"
+echo fetch_stages_api OK >> "%LOG%"
 
 echo [3/7] Rebuilding fantasy scores... >> "%LOG%"
 "%PYTHON%" -u build_fantasy.py >> "%LOG%" 2>&1
