@@ -1,0 +1,6 @@
+# Agentic Flynance dependencies.
+# Deliberately minimal: the fly brain is hand-written NumPy, no deep-learning
+# framework required. See README.md "Why NumPy and not PyTorch".
+numpy>=1.24
+gymnasium>=0.29
+pytest>=7.0
