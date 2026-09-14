@@ -209,10 +209,22 @@ full episodes with return-to-go, an optional running-mean baseline, and an entro
 | S1 | Brain has exactly 4,010 parameters | `tests/test_flynance_brain.py` |
 | S2 | Analytic gradients match finite differences to < 1e-6 | `tests/test_flynance_brain.py` |
 | S3 | DP optimum shows known structure (stand on hard 17+, hit hard 12 vs dealer 2 and 3) and its exact EV lies within 2 standard errors of a 200,000-hand simulation of the same policy | `tests/test_flynance_optimal.py` |
-| S4 | `spec_baseline` degenerates: stand-rate on hittable states > 0.9 | `tests/test_flynance_trainers.py` |
+| S4 | `spec_baseline` degenerates onto a single constant action (stand-rate on hittable states > 0.9 or < 0.1); which action is seed-dependent | `tests/test_flynance_trainers.py` |
 | S5 | `reinforce` beats always-stand and `spec_baseline` with non-overlapping 95% CIs over 10,000 hands | `run_experiment.py` report |
 | S6 | `reinforce` reaches >= 85% frequency-weighted agreement with the DP optimum | `strategy.alignment` |
 | S7 | Same seed produces identical metrics across runs | `tests/test_flynance_trainers.py` |
+
+### Measured failure mode of the spec loop
+
+Predicted before the experiment: the loop collapses to always-stand, because STAND collects an
+immediate +/-1 while a non-busting HIT produces no gradient at all.
+
+Measured across seeds 0-7 at 20,000 episodes: it collapses onto **one constant action**, but which
+one depends on the seed — four seeds went to always-hit, three to always-stand, one landed in
+between. Standing everywhere pays about -0.18 per hand; hitting everywhere never stops hitting, so
+every hand busts and the EV is exactly **-1.0**. With no baseline to calibrate two negative signals
+against each other, the loop has no fixed point other than a corner. S4 is therefore stated as
+"degenerate", not "always-stand".
 
 ---
 
