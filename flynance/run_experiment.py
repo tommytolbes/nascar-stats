@@ -288,10 +288,21 @@ def main() -> int:
 
     if args.check_reproducible and metrics_path.exists():
         previous = json.loads(metrics_path.read_text())
-        identical = previous == metrics
+        # Compare only sections both runs actually computed: a stored run made
+        # with --ablation carries a section a plain run never produces, and that
+        # absence is not a reproducibility failure.
+        shared = set(previous) & set(metrics)
+        skipped = sorted((set(previous) ^ set(metrics)))
+        differing = sorted(key for key in shared if previous[key] != metrics[key])
+
         print(f"\nReproducibility check vs {metrics_path.name}: "
-              f"{'IDENTICAL' if identical else 'DIFFERENT'}")
-        if not identical:
+              f"{'IDENTICAL' if not differing else 'DIFFERENT'} "
+              f"({len(shared)} sections compared)")
+        if skipped:
+            print(f"  not compared (present in only one run): {', '.join(skipped)}")
+        if differing:
+            for key in differing:
+                print(f"  {key}:\n    stored: {previous[key]}\n    rerun:  {metrics[key]}")
             return 1
     else:
         metrics_path.write_text(json.dumps(metrics, indent=2, sort_keys=True))

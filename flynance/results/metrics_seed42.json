@@ -1,0 +1,95 @@
+{
+  "ablation": {
+    "ci95": [
+      -0.06644170848380372,
+      -0.029158291516196283
+    ],
+    "ev": -0.0478,
+    "n_parameters": 4586,
+    "raw_alignment": 0.9392857142857143,
+    "weighted_alignment": 0.924151562690117
+  },
+  "alignment": {
+    "n_disagreements": 21,
+    "raw": 0.925,
+    "weighted": 0.8836072793715434
+  },
+  "all_criteria_passed": true,
+  "config": {
+    "episodes": 200000,
+    "eval_hands": 10000,
+    "seed": 42
+  },
+  "criteria": {
+    "S1  brain has exactly 4,010 parameters": true,
+    "S4  spec_baseline collapses to a constant action (stand-rate > 0.9 or < 0.1)": true,
+    "S5a reinforce beats always_stand (non-overlapping 95% CI)": true,
+    "S5b reinforce beats spec_baseline (non-overlapping 95% CI)": true,
+    "S6  weighted alignment with DP optimum >= 85%": true
+  },
+  "evaluation": {
+    "DP optimal (ceiling)": {
+      "ci95": [
+        -0.05099047553927757,
+        -0.013809524460722429
+      ],
+      "ev": -0.0324,
+      "loss_rate": 0.4665,
+      "push_rate": 0.0994,
+      "stderr": 0.009484936499631414,
+      "win_rate": 0.4341
+    },
+    "always_stand": {
+      "ci95": [
+        -0.19296024087269031,
+        -0.15543975912730967
+      ],
+      "ev": -0.1742,
+      "loss_rate": 0.5603,
+      "push_rate": 0.0536,
+      "stderr": 0.009571551465658322,
+      "win_rate": 0.3861
+    },
+    "dealer_mimic (hit < 17)": {
+      "ci95": [
+        -0.0805670318313709,
+        -0.043632968168629105
+      ],
+      "ev": -0.0621,
+      "loss_rate": 0.4768,
+      "push_rate": 0.1085,
+      "stderr": 0.009421955016005562,
+      "win_rate": 0.4147
+    },
+    "reinforce (fly brain)": {
+      "ci95": [
+        -0.0675457643238115,
+        -0.030254235676188495
+      ],
+      "ev": -0.0489,
+      "loss_rate": 0.4781,
+      "push_rate": 0.0927,
+      "stderr": 0.009513145063169135,
+      "win_rate": 0.4292
+    },
+    "spec_baseline (fly brain)": {
+      "ci95": [
+        -1.0,
+        -1.0
+      ],
+      "ev": -1.0,
+      "loss_rate": 1.0,
+      "push_rate": 0.0,
+      "stderr": 0.0,
+      "win_rate": 0.0
+    }
+  },
+  "n_parameters": 4010,
+  "optimal_ev": -0.046555977066697486,
+  "reinforce_stand_rate_on_hittable": 0.16111111111111112,
+  "spec_alignment": {
+    "raw": 0.6071428571428571,
+    "weighted": 0.47117333394597033
+  },
+  "spec_stand_rate_on_hittable": 0.0
+}
