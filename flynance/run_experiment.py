@@ -107,8 +107,12 @@ def run(
     eval_hands: int,
     verbose: bool = True,
     ablation: bool = False,
-) -> tuple[str, dict]:
-    """Execute the full experiment, returning (report text, metrics dict)."""
+) -> tuple[str, dict, "FlyBlackjackBrain"]:
+    """Execute the full experiment.
+
+    Returns the report text, the metrics dict, and the trained REINFORCE brain
+    so the caller can save it (see ``--save-model``) and replay it later.
+    """
     started = time.time()
     lines: list[str] = []
     metrics: dict = {"config": {
@@ -253,7 +257,7 @@ def run(
     metrics["all_criteria_passed"] = all(passed for _, passed in checks)
 
     emit(f"\nCompleted in {time.time() - started:.1f}s")
-    return "\n".join(lines), metrics
+    return "\n".join(lines), metrics, fly_brain
 
 
 def main() -> int:
@@ -264,7 +268,8 @@ def main() -> int:
     parser.add_argument("--eval-hands", type=int, default=10_000,
                         help="hands in the evaluation sweep (spec section 6: 10000)")
     parser.add_argument("--output", type=Path, default=RESULTS_DIR / "report.txt")
-    parser.add_argument("--save-model", type=Path, default=RESULTS_DIR / "fly_brain.npz")
+    parser.add_argument("--save-model", type=Path, default=RESULTS_DIR / "fly_brain.npz",
+                        help="where to write the trained brain (.npz) for replay")
     parser.add_argument("--check-reproducible", action="store_true",
                         help="compare metrics against the stored run for this seed")
     parser.add_argument("--ablation", action="store_true",
@@ -274,7 +279,7 @@ def main() -> int:
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
-    report, metrics = run(
+    report, metrics, fly_brain = run(
         episodes=args.episodes,
         seed=args.seed,
         eval_hands=args.eval_hands,
@@ -284,6 +289,13 @@ def main() -> int:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(report)
+
+    # Persist the trained brain so it can be replayed without retraining
+    # (flynance/watch.py loads exactly this file).
+    if args.save_model:
+        args.save_model.parent.mkdir(parents=True, exist_ok=True)
+        fly_brain.save(args.save_model)
+        print(f"Trained brain saved to {args.save_model}")
     metrics_path = args.output.parent / f"metrics_seed{args.seed}.json"
 
     if args.check_reproducible and metrics_path.exists():

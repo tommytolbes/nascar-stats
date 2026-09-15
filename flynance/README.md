@@ -37,7 +37,31 @@ python -m flynance.run_experiment --episodes 200000 --seed 42
 
 # Tests (including the finite-difference gradient check and the DP cross-check)
 python -m pytest tests/test_flynance_*.py -v
+
+# Watch the trained fly play, hand by hand, with its confidence on every decision
+python -m flynance.watch --hands 10
 ```
+
+`watch.py` loads the brain saved by `run_experiment.py` (`--save-model`, on by
+default), or trains one on first use. Sample output:
+
+```
+Hand 6
+----------------------------------------------------
+  Dealer shows   10
+  Fly holds      [2, 5] = 7
+  Fly decides    HIT    (100% confident)
+  Draws          9  ->  [2, 5, 9] = 16
+  Fly decides    STAND  (98% confident)
+  Dealer plays   [10, 4, 8] = 22
+  Dealer BUSTS at 22
+  Result         WIN   +1
+```
+
+That hand shows the weakness the decision matrix quantifies: standing on a hard
+16 against a dealer 10 — at 98% confidence — is one of the 21 cells where the fly
+disagrees with optimal play. It won anyway, which is exactly why single hands
+prove nothing and the 10,000-hand sweep does.
 
 The run writes `flynance/results/report.txt` and `flynance/results/metrics_seed42.json`. A committed
 sample of both is in `results/`.
