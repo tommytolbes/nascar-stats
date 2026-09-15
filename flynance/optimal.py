@@ -363,3 +363,58 @@ def optimal_action(state: tuple[int, int, int]) -> int:
     """Return the optimal action (``0`` stand, ``1`` hit) for ``state``."""
     key = (int(state[0]), int(state[1]), int(state[2]))
     return _cached_solution().policy[key]
+
+def policy_expected_value(policy: dict[tuple[int, int, int], int]) -> float:
+    """Exact expected value of an arbitrary hit/stand policy, by backward induction.
+
+    The Monte-Carlo sweep in :mod:`flynance.evaluate` measures a policy by
+    playing it; over 10,000 hands its standard error is about 0.01, which is
+    larger than the entire gap between a good policy and a perfect one. This
+    computes the same quantity exactly, so two policies can be separated without
+    sampling noise at all.
+
+    Same machinery as :func:`solve`, with one change: instead of taking the
+    better of stand and hit at each state, it takes whichever action ``policy``
+    names. States the policy does not cover fall back to the dealer's own rule
+    (hit below 17), matching how the agents are evaluated elsewhere.
+
+    Parameters
+    ----------
+    policy:
+        Maps ``(player_sum, dealer_upcard, usable_ace)`` to 0 (stand) or 1 (hit).
+
+    Returns
+    -------
+    float
+        Expected value per hand, integrated over the true initial deal.
+    """
+    grouped = _states_by_hard_sum()
+    value: dict[tuple[int, int, int], float] = {}
+
+    # Every hit strictly increases hard_sum, so descending order guarantees a
+    # state's successors are solved before it is.
+    for hard_sum in sorted(grouped, reverse=True):
+        for player_sum, usable in grouped[hard_sum]:
+            has_ace = bool(usable)
+            for upcard in UPCARDS:
+                state = (player_sum, upcard, usable)
+                action = policy.get(state)
+                if action is None:
+                    action = 0 if player_sum >= 17 else 1
+
+                if action == 0:
+                    value[state] = _stand_value(player_sum, upcard)
+                    continue
+
+                total = 0.0
+                for card, probability in CARD_PROBABILITY.items():
+                    next_sum, next_ace = _draw(hard_sum, has_ace, card)
+                    if next_sum > 21:
+                        total -= probability  # bust
+                        continue
+                    next_total, next_usable = hand_total(next_sum, next_ace)
+                    total += probability * value[(next_total, upcard, next_usable)]
+                value[state] = total
+
+    deal = _initial_deal_distribution()
+    return sum(prob * value[state] for state, prob in deal.items())

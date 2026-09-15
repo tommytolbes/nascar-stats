@@ -99,7 +99,7 @@
 
   /* ---------- seats ---------- */
   .seats{
-    display:grid;grid-template-columns:repeat(6,1fr);gap:clamp(5px,.9vw,11px);
+    display:grid;grid-template-columns:repeat(7,1fr);gap:clamp(4px,.7vw,9px);
   }
   .seat{
     display:flex;flex-direction:column;align-items:center;gap:7px;
@@ -123,6 +123,8 @@
   .seat.star .fly-desc{color:var(--brass)}
   .seat.rival .fly-name{color:#8FD2DA}
   .seat.rival .fly-desc{color:var(--ocean)}
+  .seat.best .fly-name{color:#7FD6A6}
+  .seat.best .fly-desc{color:#4F9B78}
   .seat.learner .fly-name{color:var(--nova);transition:color 1.2s linear}
   .seat.learner .fly-desc{color:var(--nova);opacity:.8;transition:color 1.2s linear}
 
@@ -288,12 +290,12 @@
 <div class="wrap">
   <header class="masthead">
     <div>
-      <p class="kicker">Agentic Flynance &middot; two trained, one learning</p>
+      <p class="kicker">Agentic Flynance &middot; same brain, three ways of seeing</p>
       <h1>The <em>Mantis</em> Room</h1>
     </div>
-    <p class="house-note">Six flies, one mantis, and a sea that does not care. Two of the
-      flies arrive trained, one is learning at the table right now, and nothing here is
-      scripted &mdash; every decision is a live forward pass.</p>
+    <p class="house-note">Seven flies, one mantis, and a sea that does not care. Three
+      arrive trained on the same game but shown it differently, one is still learning,
+      and every decision here is a live forward pass.</p>
   </header>
 
   <div class="window">
@@ -357,8 +359,8 @@
         <span class="bar-val" id="val-hit">&mdash;</span>
       </div>
       <p class="judgement" id="judgement">Each decision is scored against the exact optimal policy,
-        computed by dynamic programming over these rules. Vesper is wrong in 21 of the 280 decision
-        cells; Iris, who sees the upcard one-hot, in 17.</p>
+        computed by dynamic programming over these rules. Of the 280 decision cells, Vesper gets 21
+        wrong, Iris 17, and Juno &mdash; who sees every feature one-hot &mdash; just 3.</p>
     </div>
     <div>
       <h2>Nova&rsquo;s nursery &mdash; learning as you watch</h2>
@@ -401,8 +403,11 @@
     ReLU policy trained by REINFORCE over 200,000 hands &mdash; evaluated in your browser, weight for weight.
     Over 10,000 hands it averages &minus;0.049 per hand against an exact optimum of &minus;0.0466.
     Iris is the same mushroom body fed a one-hot dealer upcard instead of <code>upcard/10</code>, which
-    stops an ace reading as the weakest card on the axis: 4,586 weights, &minus;0.046 per hand, and
-    agreement with the optimum up from 88.4% to 92.4%.
+    stops an ace reading as the weakest card on the axis: 4,586 weights, 17 cells wrong.
+    Juno goes further and one-hots the player&rsquo;s total too, so 16 no longer reads as
+    &ldquo;nearly 17&rdquo;: 5,674 weights, 3 cells wrong, and an exact expected value of
+    &minus;0.046957 against a perfect &minus;0.046556. Her three remaining mistakes are 12 against a
+    dealer 4, 5 and 6 &mdash; the most marginal calls in the game.
     Nova is that same architecture with the training loop still attached: she starts from random weights and runs
     REINFORCE in your browser &mdash; return-to-go, a running-mean baseline, an entropy bonus, Adam decaying from
     5e-4 to 2e-5 &mdash; reaching roughly 88% agreement in about 200,000 hands, which takes under a minute here.
@@ -414,7 +419,8 @@
 <script>
 (() => {
   "use strict";
-  const W = window.FLY_WEIGHTS, WOH = window.ONEHOT_WEIGHTS, OPT = window.OPTIMAL_POLICY;
+  const W = window.FLY_WEIGHTS, WOH = window.ONEHOT_WEIGHTS, WF = window.FULL_WEIGHTS,
+        OPT = window.OPTIMAL_POLICY;
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   /* ---------- the fly brains, weight for weight ---------- */
@@ -448,8 +454,19 @@
     return x;
   };
 
-  const flyPolicy   = (s, up, ace) => forward(W,   specInput(s, up, ace), 3);
+  // Everything one-hot: the player's total stops implying 16 is "close to" 17,
+  // which is false exactly where the game's sharpest boundary sits.
+  const fullInput = (sum, up, ace) => {
+    const x = new Array(29).fill(0);
+    if (sum >= 4 && sum <= 21) x[sum - 4] = 1;      // x[0] is 4 ... x[17] is 21
+    if (up >= 1 && up <= 10) x[17 + up] = 1;        // x[18] is the ace ... x[27] a ten
+    x[28] = ace;
+    return x;
+  };
+
+  const flyPolicy    = (s, up, ace) => forward(W,   specInput(s, up, ace), 3);
   const onehotPolicy = (s, up, ace) => forward(WOH, oneHotInput(s, up, ace), 12);
+  const fullPolicy   = (s, up, ace) => forward(WF,  fullInput(s, up, ace), 29);
 
   /* ---------- rules: infinite shoe, dealer stands on soft 17 ---------- */
   const DECK = [1,2,3,4,5,6,7,8,9,10,10,10,10];
@@ -463,13 +480,19 @@
 
   /* ---------- the players ---------- */
   const FLIES = [
-    { id:"vesper", name:"Vesper", star:true,  net:true, desc:"4,010 weights\nupcard as one number",
+    { id:"vesper", name:"Vesper", star:true,  net:true, enc:"spec",   wrong:21,
+      desc:"4,010 weights\nupcard as one number",
       act:(s,up,ace)=>{ const p = flyPolicy(s,up,ace); return {action: p[1]>p[0]?1:0, probs:p}; } },
-    { id:"iris",   name:"Iris",   rival:true, net:true, desc:"4,586 weights\nupcard one-hot",
+    { id:"iris",   name:"Iris",   rival:true, net:true, enc:"onehot", wrong:17,
+      desc:"4,586 weights\nupcard one-hot",
       act:(s,up,ace)=>{ const p = onehotPolicy(s,up,ace); return {action: p[1]>p[0]?1:0, probs:p}; } },
+    { id:"juno",   name:"Juno",   best:true,  net:true, enc:"full",   wrong:3,
+      desc:"5,674 weights\neverything one-hot",
+      act:(s,up,ace)=>{ const p = fullPolicy(s,up,ace); return {action: p[1]>p[0]?1:0, probs:p}; } },
     { id:"nova",   name:"Nova",   learner:true, desc:"learning now\nfrom every hand",
       // She samples rather than taking the greedy action: REINFORCE is only
       // unbiased on-policy, so exploring here is what makes the hand teachable.
+      enc:"spec",
       act:(s,up,ace)=>{
         const r = nova.act(s,up,ace);
         novaHand.xs.push(r.x); novaHand.acts.push(r.action); novaHand.ps.push(r.probs);
@@ -496,23 +519,26 @@
   FLIES.forEach(f => state[f.id] = {cards:[], done:false, w:0, l:0, p:0, net:0});
 
   /* ---------- seats ---------- */
-  const flySVG = (starred, rival, learner) => `
+  const flySVG = (f) => {
+    const starred = f.star, rival = f.rival, learner = f.learner, best = f.best;
+    return `
     <svg class="bug" width="42" height="34" viewBox="0 0 42 34" aria-hidden="true">
       <ellipse class="wing"  cx="15" cy="13" rx="11" ry="5.5"
-        fill="${starred ? 'rgba(240,177,131,.42)' : rival ? 'rgba(110,190,200,.36)' : 'rgba(242,232,220,.26)'}"/>
+        fill="${starred ? 'rgba(240,177,131,.42)' : rival ? 'rgba(110,190,200,.36)' : best ? 'rgba(127,214,166,.34)' : 'rgba(242,232,220,.26)'}"/>
       <ellipse class="wing2" cx="27" cy="13" rx="11" ry="5.5"
-        fill="${starred ? 'rgba(240,177,131,.3)' : rival ? 'rgba(110,190,200,.24)' : 'rgba(242,232,220,.18)'}"/>
-      <ellipse cx="21" cy="20" rx="7" ry="9" fill="${starred || rival ? '#3C4448' : '#2C3438'}"/>
-      <ellipse cx="21" cy="11" rx="5" ry="4.4" fill="${starred || rival ? '#4A5358' : '#394246'}"/>
-      <circle cx="17.6" cy="10" r="2.6" fill="${starred ? '#E8894A' : rival ? '#6EBEC8' : learner ? 'var(--nova)' : '#8A4A3C'}"/>
-      <circle cx="24.4" cy="10" r="2.6" fill="${starred ? '#E8894A' : rival ? '#6EBEC8' : learner ? 'var(--nova)' : '#8A4A3C'}"/>
+        fill="${starred ? 'rgba(240,177,131,.3)' : rival ? 'rgba(110,190,200,.24)' : best ? 'rgba(127,214,166,.22)' : 'rgba(242,232,220,.18)'}"/>
+      <ellipse cx="21" cy="20" rx="7" ry="9" fill="${starred || rival || best ? '#3C4448' : '#2C3438'}"/>
+      <ellipse cx="21" cy="11" rx="5" ry="4.4" fill="${starred || rival || best ? '#4A5358' : '#394246'}"/>
+      <circle cx="17.6" cy="10" r="2.6" fill="${starred ? '#E8894A' : rival ? '#6EBEC8' : best ? '#7FD6A6' : learner ? 'var(--nova)' : '#8A4A3C'}"/>
+      <circle cx="24.4" cy="10" r="2.6" fill="${starred ? '#E8894A' : rival ? '#6EBEC8' : best ? '#7FD6A6' : learner ? 'var(--nova)' : '#8A4A3C'}"/>
       <path d="M19 7 L17 3 M23 7 L25 3" stroke="${starred || rival ? '#4A5358' : '#394246'}"
         stroke-width="1.1" stroke-linecap="round"/>
     </svg>`;
+  };
 
   document.getElementById("seats").innerHTML = FLIES.map(f => `
-    <div class="seat ${f.star ? 'star' : ''}${f.rival ? ' rival' : ''}${f.learner ? ' learner' : ''}" id="seat-${f.id}">
-      ${flySVG(f.star, f.rival, f.learner)}
+    <div class="seat ${f.star ? 'star' : ''}${f.rival ? ' rival' : ''}${f.best ? ' best' : ''}${f.learner ? ' learner' : ''}" id="seat-${f.id}">
+      ${flySVG(f)}
       <div class="fly-name">${f.name}</div>
       <div class="fly-desc">${f.desc.replace("\n","<br>")}</div>
       <div class="hand" id="hand-${f.id}"></div>
@@ -554,10 +580,12 @@
 
   /* ---------- Vesper's telemetry ---------- */
   function showReadout(fly, sum, up, ace, probs, action){
-    const kind = fly.star ? "spec encoding" : fly.learner ? "learning, spec encoding" : "one-hot encoding";
+    const ENC_NAME = { spec:"spec encoding", onehot:"one-hot upcard", full:"everything one-hot" };
+    const kind = fly.learner ? "learning, spec encoding" : ENC_NAME[fly.enc];
     $("readout-title").textContent = `${fly.name} — ${kind}`;
-    const input = fly.rival
-      ? `[${(sum/21).toFixed(3)}, one-hot ${rank(up)}, ${ace}]`
+    const input =
+      fly.enc === "onehot" ? `[${(sum/21).toFixed(3)}, one-hot ${rank(up)}, ${ace}]`
+      : fly.enc === "full" ? `[one-hot ${sum}, one-hot ${rank(up)}, ${ace}]`
       : `[${(sum/21).toFixed(3)}, ${(up/10).toFixed(2)}, ${ace}]`;
     $("readout-state").textContent =
       `player ${sum}${ace ? " (soft)" : ""} · dealer shows ${rank(up)} → input ${input}`;
@@ -569,7 +597,7 @@
     const best = OPT[`${sum}_${up}_${ace}`];
     const name = a => a === 1 ? "hit" : "stand";
     let msg;
-    const wrongCells = fly.star ? 21 : fly.rival ? 17 : null;
+    const wrongCells = fly.learner ? null : fly.wrong;
     if (best === undefined){
       msg = `${fly.name} chose to <b>${name(action)}</b>. This state sits outside the solved grid.`;
     } else if (best === action){

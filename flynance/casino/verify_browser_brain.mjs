@@ -50,6 +50,13 @@ const oneHotInput = (sum, up, ace) => {
   x[11] = ace;
   return x;
 };
+const fullInput = (sum, up, ace) => {
+  const x = new Array(29).fill(0);
+  if (sum >= 4 && sum <= 21) x[sum - 4] = 1;        // x[0] == 4 ... x[17] == 21
+  if (up >= 1 && up <= 10) x[17 + up] = 1;          // x[18] == ace ... x[27] == ten
+  x[28] = ace;
+  return x;
+};
 
 function check(label, refFile, W, encode, inN) {
   const refPath = path.join(here, refFile);
@@ -78,6 +85,9 @@ const results = [
   check('spec', 'reference_policy.json', globalThis.FLY_WEIGHTS, specInput, 3),
   globalThis.ONEHOT_WEIGHTS
     ? check('one-hot', 'reference_policy_onehot.json', globalThis.ONEHOT_WEIGHTS, oneHotInput, 12)
+    : null,
+  globalThis.FULL_WEIGHTS
+    ? check('full', 'reference_policy_full.json', globalThis.FULL_WEIGHTS, fullInput, 29)
     : null,
 ].filter(Boolean);
 

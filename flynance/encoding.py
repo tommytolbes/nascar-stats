@@ -35,6 +35,7 @@ INPUT_SIZE = 3
 
 #: Input width of the ablation encoding: 1 (player sum) + 10 (dealer one-hot) + 1 (ace).
 RICH_INPUT_SIZE = 12
+FULL_INPUT_SIZE = 29
 
 
 def preprocess_state(state: tuple[int, int, int]) -> np.ndarray:
@@ -122,3 +123,42 @@ def encode_batch_rich(states: Sequence[tuple[int, int, int]]) -> np.ndarray:
     if len(states) == 0:
         return np.zeros((0, RICH_INPUT_SIZE), dtype=np.float64)
     return np.stack([preprocess_state_rich(s) for s in states]).astype(np.float64, copy=False)
+
+
+def preprocess_state_full_onehot(state: tuple[int, int, int]) -> np.ndarray:
+    """Every feature one-hot: no false ordering anywhere in the input.
+
+    Layout (width :data:`FULL_INPUT_SIZE` = 29)::
+
+        [0:18]   one-hot over player sum 4..21
+        [18:28]  one-hot over dealer upcard 1..10  (index 18 == ace)
+        [28]     float(usable_ace)
+
+    :func:`preprocess_state_rich` fixes the dealer upcard but still feeds the
+    player's total as a single scalar ``sum / 21``, which quietly asserts that 16
+    is "close to" 17. For hit/stand that is false in the way that matters most:
+    16 and 17 sit on opposite sides of the sharpest boundary in the game, while
+    12 and 13 are near-interchangeable. One-hot removes that assumption too, at
+    the cost of a wider input layer.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(FULL_INPUT_SIZE,)``, dtype ``float64``.
+    """
+    player_sum, dealer_upcard, usable_ace = state
+    out = np.zeros(FULL_INPUT_SIZE, dtype=np.float64)
+    if 4 <= player_sum <= 21:
+        out[player_sum - 4] = 1.0
+    upcard = int(dealer_upcard)
+    if 1 <= upcard <= 10:
+        out[17 + upcard] = 1.0   # out[18] == ace ... out[27] == ten
+    out[28] = float(usable_ace)
+    return out
+
+
+def encode_batch_full_onehot(states: Sequence[tuple[int, int, int]]) -> np.ndarray:
+    """Batch form of :func:`preprocess_state_full_onehot`; shape ``(N, 29)``."""
+    if len(states) == 0:
+        return np.zeros((0, FULL_INPUT_SIZE), dtype=np.float64)
+    return np.stack([preprocess_state_full_onehot(s) for s in states]).astype(np.float64, copy=False)

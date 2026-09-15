@@ -163,22 +163,47 @@ where the optimum is to take the risk and hit. The most expensive, by visit freq
 
 For comparison, the spec-trained network's alignment is 60.7% raw / 47.1% weighted.
 
-### The mistakes are the encoding's fault, not the brain's
+### The mistakes are the encoding's fault — and fixing the encoding fixes them
 
-Notice where the errors cluster: dealer upcards 7 through ace. The specification's encoding divides
-the upcard by 10, which maps an ace to **0.1** — numerically the *weakest* input value, while an ace
-is strategically the dealer's *strongest* card. The network is being asked to learn a non-monotonic
-boundary from a single scalar.
+Vesper's 21 errors all sit in the dealer 7-through-ace columns. The spec divides the upcard by 10, so
+a dealer ace arrives as **0.1** — numerically the weakest value on the axis, while strategically it is
+the dealer's strongest card. The network is asked to learn a non-monotonic boundary from one scalar.
 
-Re-running with the dealer upcard one-hot encoded, changing nothing else about the mushroom body:
+Fixing that is a question about the *input*, not the network, so the same mushroom body was retrained
+against progressively honest encodings. Each is scored by exact dynamic programming
+(`optimal.policy_expected_value`) rather than by sampling:
 
-| Encoding | Parameters | EV | Weighted alignment |
-|---|---|---|---|
-| Spec: 3 scalars | 4,010 | −0.0489 | 88.4% |
-| One-hot upcard | 4,586 | −0.0478 | **92.4%** |
+| Encoding | Params | Cells wrong | Weighted agreement | Exact EV | Gap from perfect |
+|---|---|---|---|---|---|
+| Spec: 3 scalars | 4,010 | 21 | 88.4% | −0.056725 | 0.010169 |
+| One-hot dealer upcard | 4,586 | 17 | 92.4% | −0.052257 | 0.005701 |
+| **Everything one-hot** | 5,674 | **3** | **98.3%** | **−0.046957** | **0.000401** |
+| *Perfect play* | — | 0 | 100% | −0.046556 | 0 |
 
-Four points of alignment for 576 extra weights in the sensory layer alone. The 4,010-parameter
-mushroom body was never the bottleneck — the sensory encoding in front of it was.
+**The error falls 25-fold.** The second step — one-hot the *player's total* as well — matters as much
+as the first: `sum / 21` quietly asserts that 16 is "close to" 17, which is false precisely where the
+game's sharpest boundary lies, while 12 and 13 really are near-interchangeable.
+
+The three cells that survive are **12 against a dealer 4, 5 and 6** — the most marginal decisions in
+blackjack, worth 0.0025 to 0.026 EV each and costing 0.00026 per hand in total. They are hard for the
+same reason they are cheap: when two actions are nearly equal in value, the reward signal separating
+them is nearly zero, so resolving them takes enormous sampling and winning them is worth almost
+nothing. The remaining gap is not a flaw in the fly; it is the price of learning from experience
+rather than solving the game.
+
+The spec's 4,010-parameter mushroom body was never the bottleneck. The sensory encoding in front of
+it was.
+
+### A correction about measurement
+
+The 10,000-hand EV table above reports Vesper at −0.0489. Her *exact* expected value is **−0.056725**.
+The sampled figure was flattering her by more than her entire error, because at 10,000 hands the
+standard error is ±0.0093 — roughly twice the whole gap between good play and perfect play.
+
+That is why `optimal.policy_expected_value` exists, and why the encoding ladder above is measured with
+it: any conclusion about which policy is better, drawn from a ten-thousand-hand sweep, is mostly
+reading noise. The sweep is kept because it answers a different question — what actually happened at
+a table — but the exact evaluator is what settles which fly plays better.
 
 ### Tuning
 

@@ -68,13 +68,24 @@ Vesper gets the spec's `upcard / 10`, which puts an ace at `0.1` — numerically
 weakest value on the axis, while strategically it is the dealer's strongest card.
 Iris gets a one-hot vector, so each upcard is free to mean whatever it means.
 
-| | Weights | EV / hand | Wrong cells | Weighted agreement |
+| | Weights | Exact EV | Cells wrong | Weighted agreement |
 |---|---|---|---|---|
-| Vesper (spec encoding) | 4,010 | −0.049 | 21 / 280 | 88.4% |
-| Iris (one-hot upcard) | 4,586 | −0.046 | 17 / 280 | 92.4% |
+| Vesper (spec encoding) | 4,010 | −0.056725 | 21 / 280 | 88.4% |
+| Iris (one-hot upcard) | 4,586 | −0.052257 | 17 / 280 | 92.4% |
+| **Juno (everything one-hot)** | 5,674 | **−0.046957** | **3 / 280** | **98.3%** |
+| *perfect play* | — | −0.046556 | 0 | 100% |
 
 Watch the dealer-ace and dealer-7-through-10 hands in particular: that is where
-Vesper stands on a hard 15 or 16 and Iris takes the card.
+Vesper stands on a hard 15 or 16 while Iris and Juno take the card.
+
+Juno's three remaining mistakes are 12 against a dealer 4, 5 and 6 — the most
+marginal calls in the game, costing 0.00026 EV per hand between them. They are
+hard for the same reason they are cheap: when two actions are almost equally
+good, there is almost no reward signal to separate them.
+
+These are *exact* expected values, computed by dynamic programming rather than by
+playing hands. At 10,000 hands the sampling error is about ±0.0096 — wider than
+the entire gap between the best fly here and perfect play.
 
 The rail shows her real output: the softmax probabilities for STAND and HIT, the
 raw three-number input vector, and whether the decision matches the exact optimum
@@ -87,6 +98,7 @@ as it happens.
 |---|---|
 | **Vesper** | the trained 4,010-weight network, spec encoding (`upcard / 10`) |
 | **Iris** | the same mushroom body with a one-hot dealer upcard — 4,586 weights |
+| **Juno** | everything one-hot — 5,674 weights, and only 3 of 280 cells wrong |
 | **Nova** | the same architecture with the *training loop still attached* — learns in your browser |
 | **Echo** | mimics the house — hits below 17 |
 | **Stoic** | never takes a card |

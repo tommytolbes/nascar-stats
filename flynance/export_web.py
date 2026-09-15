@@ -26,16 +26,24 @@ from flynance import optimal as opt
 PARAM_KEYS = ("W1", "b1", "W2", "b2", "W3", "b3")
 DEFAULT_MODEL = Path(__file__).resolve().parent / "results" / "fly_brain.npz"
 DEFAULT_ONEHOT = Path(__file__).resolve().parent / "results" / "fly_brain_onehot.npz"
+DEFAULT_FULL = Path(__file__).resolve().parent / "results" / "fly_brain_full.npz"
 DEFAULT_OUT = Path(__file__).resolve().parent / "casino" / "brain-data.js"
 
 
-def write_reference(model_path: Path, ref_path: Path, rich: bool = False) -> Path:
+def write_reference(model_path: Path, ref_path: Path, rich: bool = False,
+                    full: bool = False) -> Path:
     """Dump Python's action probabilities for every state, for the JS cross-check."""
     from flynance.brain import FlyBlackjackBrain
-    from flynance.encoding import (RICH_INPUT_SIZE, preprocess_state,
+    from flynance.encoding import (FULL_INPUT_SIZE, RICH_INPUT_SIZE,
+                                   preprocess_state, preprocess_state_full_onehot,
                                    preprocess_state_rich)
 
-    if rich:
+    if full:
+        class FullOneHotBrain(FlyBlackjackBrain):
+            LAYER_SIZES = (FULL_INPUT_SIZE, 64, 56, 2)
+        brain = FullOneHotBrain.load(model_path)
+        preprocess_state = preprocess_state_full_onehot  # noqa: F811 - deliberate swap
+    elif rich:
         class WideSensoryBrain(FlyBlackjackBrain):
             LAYER_SIZES = (RICH_INPUT_SIZE, 64, 56, 2)
         brain = WideSensoryBrain.load(model_path)
@@ -68,7 +76,7 @@ def _load_flat(model_path: Path, decimals: int) -> tuple[dict, int]:
 
 
 def export(model_path: Path, out_path: Path, decimals: int = 6,
-           onehot_path: Path | None = None) -> Path:
+           onehot_path: Path | None = None, full_path: Path | None = None) -> Path:
     """Write the weights and the optimal policy as a browser-loadable JS file.
 
     When ``onehot_path`` points at a saved ablation brain, its weights are
@@ -87,6 +95,10 @@ def export(model_path: Path, out_path: Path, decimals: int = 6,
     onehot_flat = onehot_total = None
     if onehot_path is not None and onehot_path.exists():
         onehot_flat, onehot_total = _load_flat(onehot_path, decimals)
+
+    full_flat = full_total = None
+    if full_path is not None and full_path.exists():
+        full_flat, full_total = _load_flat(full_path, decimals)
 
     solution = opt.solve()
     policy = {f"{s}_{u}_{a}": int(act) for (s, u, a), act in solution.policy.items()}
@@ -110,6 +122,13 @@ def export(model_path: Path, out_path: Path, decimals: int = 6,
             "[11] usable ace.\n",
             "window.ONEHOT_WEIGHTS = " + json.dumps(onehot_flat, separators=(",", ":")) + ";\n",
         ]
+    if full_flat is not None:
+        parts += [
+            f"// Fully one-hot fly: {full_total:,} weights from {full_path.name}.\n",
+            "// Input layout: [0:18] one-hot player sum 4..21, [18:28] one-hot upcard\n"
+            "// (index 18 == ace), [28] usable ace.\n",
+            "window.FULL_WEIGHTS = " + json.dumps(full_flat, separators=(",", ":")) + ";\n",
+        ]
     parts += [
         "// Exact optimal hit/stand policy from dynamic programming (optimal.py).\n",
         "window.OPTIMAL_POLICY = " + json.dumps(policy, separators=(",", ":")) + ";\n",
@@ -121,6 +140,7 @@ def export(model_path: Path, out_path: Path, decimals: int = 6,
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("".join(parts))
     extra = f", {onehot_total:,} one-hot weights" if onehot_flat else ""
+    extra += f", {full_total:,} full-one-hot weights" if full_flat else ""
     print(f"Wrote {out_path} ({out_path.stat().st_size:,} bytes): "
           f"{total:,} weights{extra}, {len(policy)} optimal decisions")
     return out_path
@@ -132,13 +152,15 @@ def main() -> int:
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--onehot-model", type=Path, default=DEFAULT_ONEHOT,
                         help="saved one-hot ablation brain; exported when present")
+    parser.add_argument("--full-model", type=Path, default=DEFAULT_FULL,
+                        help="saved fully-one-hot brain; exported when present")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--decimals", type=int, default=6)
     parser.add_argument("--reference", type=Path, default=None,
                         help="also dump Python action probabilities for "
                              "verify_browser_brain.mjs to check against")
     args = parser.parse_args()
-    export(args.model, args.out, args.decimals, args.onehot_model)
+    export(args.model, args.out, args.decimals, args.onehot_model, args.full_model)
     if args.reference:
         write_reference(args.model, args.reference)
         if args.onehot_model and args.onehot_model.exists():
@@ -146,6 +168,11 @@ def main() -> int:
                             args.reference.with_name(
                                 args.reference.stem + "_onehot" + args.reference.suffix),
                             rich=True)
+        if args.full_model and args.full_model.exists():
+            write_reference(args.full_model,
+                            args.reference.with_name(
+                                args.reference.stem + "_full" + args.reference.suffix),
+                            full=True)
     return 0
 
 

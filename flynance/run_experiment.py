@@ -53,52 +53,68 @@ def _section(title: str) -> str:
 
 
 def run_encoding_ablation(episodes: int, seed: int, eval_hands: int,
-                          solution: opt.OptimalSolution) -> tuple[str, dict, object]:
-    """Ask whether the spec's 3-scalar sensory encoding is the binding constraint.
+                          solution: opt.OptimalSolution) -> tuple[str, dict, dict]:
+    """Walk the encoding ladder: how much of the fly's error is the input's fault?
 
-    The spec maps a dealer ace to 0.1 -- numerically the weakest upcard, while
-    strategically it is the strongest -- so the network has to learn a
-    non-monotonic boundary from a single scalar. This retrains an identical
-    network whose only difference is a wider input layer fed a one-hot dealer
-    upcard, and reports what that buys.
+    Three networks, identical but for how the state is presented to them:
+
+    * the spec's three scalars, where a dealer ace arrives as 0.1 -- numerically
+      the weakest upcard while being strategically the strongest;
+    * a one-hot dealer upcard, which removes that false ordering;
+    * everything one-hot, which also stops the player's total asserting that 16
+      is "close to" 17 -- false exactly where the game's sharpest boundary sits.
+
+    Each is scored by exact dynamic programming rather than by sampling, because
+    the differences here are smaller than the noise in a 10,000-hand sweep.
     """
     from flynance.brain import FlyBlackjackBrain
-    from flynance.encoding import RICH_INPUT_SIZE, preprocess_state_rich
+    from flynance import encoding as enc
 
-    class WideSensoryBrain(FlyBlackjackBrain):
-        """Same mushroom body, wider sensory layer."""
-
-        LAYER_SIZES = (RICH_INPUT_SIZE, 64, 56, 2)
-
-    brain = WideSensoryBrain(rng=np.random.default_rng(seed), lr=TUNED["lr"])
-    brain, _ = train_reinforce(
-        episodes=episodes,
-        seed=seed,
-        encoder=preprocess_state_rich,
-        brain=brain,
-        entropy_coef=TUNED["entropy_coef"],
-    )
-    policy_fn = ev.greedy_policy_fn(brain, encoder=preprocess_state_rich)
-    result = ev.evaluate(policy_fn, n_hands=eval_hands, seed=seed,
-                         label="reinforce + one-hot upcard encoding")
-    align = strat.alignment(policy_fn, solution)
+    variants = [
+        ("one-hot upcard", enc.RICH_INPUT_SIZE, enc.preprocess_state_rich, "onehot"),
+        ("full one-hot", enc.FULL_INPUT_SIZE, enc.preprocess_state_full_onehot, "full"),
+    ]
 
     lines = [
-        f"Parameters: {brain.num_parameters()} "
-        f"(vs {FlyBlackjackBrain.N_PARAMETERS} for the spec encoding)",
-        f"EV over {eval_hands:,} hands: {result.ev:+.4f} "
-        f"[{result.ci95[0]:+.4f}, {result.ci95[1]:+.4f}]",
-        f"Weighted alignment with the optimum: {align['weighted']:.1%} "
-        f"(raw {align['raw']:.1%})",
+        f"{'encoding':<18}{'params':>8}{'wrong':>7}{'weighted':>10}{'exact EV':>12}{'vs optimal':>12}",
+        "-" * 67,
     ]
-    metrics = {
-        "n_parameters": int(brain.num_parameters()),
-        "ev": float(result.ev),
-        "ci95": [float(result.ci95[0]), float(result.ci95[1])],
-        "weighted_alignment": float(align["weighted"]),
-        "raw_alignment": float(align["raw"]),
-    }
-    return "\n".join(lines), metrics, brain
+    metrics: dict = {}
+    brains: dict = {}
+
+    # The spec-encoded fly is trained by the main run; score it here for the ladder.
+    for label, width, encoder, key in variants:
+        class VariantBrain(FlyBlackjackBrain):
+            LAYER_SIZES = (width, 64, 56, 2)
+
+        brain = VariantBrain(rng=np.random.default_rng(seed), lr=TUNED["lr"])
+        brain, _ = train_reinforce(
+            episodes=episodes,
+            seed=seed,
+            encoder=encoder,
+            brain=brain,
+            entropy_coef=TUNED["entropy_coef"],
+        )
+        policy_fn = ev.greedy_policy_fn(brain, encoder=encoder)
+        align = strat.alignment(policy_fn, solution)
+        grid = {s: int(policy_fn(s, None)) for s in solution.policy}
+        exact = opt.policy_expected_value(grid)
+
+        lines.append(
+            f"{label:<18}{brain.num_parameters():>8}{len(align['disagreements']):>7}"
+            f"{align['weighted']:>9.1%}{exact:>12.6f}"
+            f"{exact - solution.expected_value:>+12.6f}"
+        )
+        metrics[key] = {
+            "label": label,
+            "n_parameters": int(brain.num_parameters()),
+            "wrong_cells": len(align["disagreements"]),
+            "weighted_alignment": float(align["weighted"]),
+            "exact_ev": float(exact),
+        }
+        brains[key] = brain
+
+    return "\n".join(lines), metrics, brains
 
 
 def run(
@@ -192,6 +208,22 @@ def run(
         for r in results
     }
 
+    # Sampling cannot separate a good policy from a perfect one at 10,000 hands
+    # (stderr ~0.01 against a total gap of ~0.005), so the same policies are also
+    # evaluated exactly, by dynamic programming over their own decisions.
+    emit("Exact expected value of the same policies (no sampling):")
+    exact_rows = []
+    for label, policy_fn in policies.items():
+        grid = {s: int(policy_fn(s, None)) for s in solution.policy}
+        exact_rows.append((label, opt.policy_expected_value(grid)))
+    exact_rows.sort(key=lambda r: r[1], reverse=True)
+    width = max(len(label) for label, _ in exact_rows)
+    for label, value in exact_rows:
+        gap = value - solution.expected_value
+        emit(f"  {label:<{width}}  {value:+.6f}   "
+             f"{'(optimal)' if abs(gap) < 1e-9 else f'{gap:+.6f} vs optimal'}")
+    metrics["exact_ev"] = {label: float(value) for label, value in exact_rows}
+
     # ---- 4. Decision matrices and alignment -------------------------------
     emit(_section("4. DECISION MATRIX vs EXACT OPTIMUM"))
     fly_policy = ev.greedy_policy_fn(fly_brain)
@@ -220,13 +252,14 @@ def run(
     # ---- 5. Optional encoding ablation ------------------------------------
     if ablation:
         emit(_section("5. ABLATION: is the spec's sensory encoding the ceiling?"))
-        ablation_text, ablation_metrics, ablation_brain = run_encoding_ablation(
+        ablation_text, ablation_metrics, ablation_brains = run_encoding_ablation(
             episodes=episodes, seed=seed, eval_hands=eval_hands, solution=solution
         )
-        metrics_holder["ablation_brain"] = ablation_brain
+        metrics_holder["ablation_brains"] = ablation_brains
         emit(ablation_text)
-        emit(f"\nFor comparison, the spec encoding reached "
-             f"{fly_alignment['weighted']:.1%} weighted alignment.")
+        emit(f"\nThe spec's own encoding, same trainer: "
+             f"{fly_alignment['weighted']:.1%} weighted, "
+             f"{len(fly_alignment['disagreements'])} cells wrong.")
         metrics["ablation"] = ablation_metrics
 
     # ---- 6. Verdict --------------------------------------------------------
@@ -260,7 +293,7 @@ def run(
     metrics["all_criteria_passed"] = all(passed for _, passed in checks)
 
     emit(f"\nCompleted in {time.time() - started:.1f}s")
-    return "\n".join(lines), metrics, fly_brain, metrics_holder.get("ablation_brain")
+    return "\n".join(lines), metrics, fly_brain, metrics_holder.get("ablation_brains")
 
 
 def main() -> int:
@@ -282,7 +315,7 @@ def main() -> int:
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
-    report, metrics, fly_brain, ablation_brain = run(
+    report, metrics, fly_brain, ablation_brains = run(
         episodes=args.episodes,
         seed=args.seed,
         eval_hands=args.eval_hands,
@@ -299,11 +332,11 @@ def main() -> int:
         args.save_model.parent.mkdir(parents=True, exist_ok=True)
         fly_brain.save(args.save_model)
         print(f"Trained brain saved to {args.save_model}")
-        if ablation_brain is not None:
-            onehot_path = args.save_model.with_name(
-                args.save_model.stem + "_onehot" + args.save_model.suffix)
-            ablation_brain.save(onehot_path)
-            print(f"One-hot ablation brain saved to {onehot_path}")
+        for key, brain in (ablation_brains or {}).items():
+            path = args.save_model.with_name(
+                f"{args.save_model.stem}_{key}{args.save_model.suffix}")
+            brain.save(path)
+            print(f"Ablation brain ({key}) saved to {path}")
     metrics_path = args.output.parent / f"metrics_seed{args.seed}.json"
 
     if args.check_reproducible and metrics_path.exists():
