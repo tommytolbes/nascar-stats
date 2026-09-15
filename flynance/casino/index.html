@@ -210,6 +210,15 @@
   }
   .nursery-note{font-size:.72rem;line-height:1.5;color:var(--shell-dim);flex:1}
   .nursery-note .up{color:var(--win)}
+  .pulse{
+    font-family:'IBM Plex Mono',monospace;font-size:.5rem;letter-spacing:.14em;
+    text-transform:uppercase;padding:2px 6px;border-radius:2px;opacity:0;
+    transition:opacity .25s;display:inline-block;margin-left:7px;
+  }
+  .pulse.show{opacity:1}
+  .pulse.dopamine{background:rgba(111,191,139,.18);color:var(--win)}
+  .pulse.octopamine{background:rgba(212,94,94,.18);color:var(--loss)}
+  .pulse.neutral{background:rgba(185,168,140,.15);color:var(--push)}
   .learn-controls{display:flex;gap:7px;margin-top:9px}
   .learn-controls button{padding:5px 11px;font-size:.72rem}
 
@@ -358,6 +367,10 @@
         <div class="stat"><b id="nova-agree">&mdash;</b><span>agrees with optimum</span></div>
         <div class="stat"><b id="nova-reward">&mdash;</b><span>reward / hand, last 2k</span></div>
         <div class="stat"><b id="nova-state">starting</b><span>status</span></div>
+        <div class="stat" style="grid-column:1/-1">
+          <b id="nova-table">0<span class="pulse" id="nova-pulse"></span></b>
+          <span>hands learned at this table</span>
+        </div>
       </div>
       <div class="nursery-body">
         <div class="grid-wrap">
@@ -454,8 +467,14 @@
       act:(s,up,ace)=>{ const p = flyPolicy(s,up,ace); return {action: p[1]>p[0]?1:0, probs:p}; } },
     { id:"iris",   name:"Iris",   rival:true, net:true, desc:"4,586 weights\nupcard one-hot",
       act:(s,up,ace)=>{ const p = onehotPolicy(s,up,ace); return {action: p[1]>p[0]?1:0, probs:p}; } },
-    { id:"nova",   name:"Nova",   learner:true, desc:"learning now\nfrom zero",
-      act:(s,up,ace)=>{ const r = nova.decide(s,up,ace); return {action:r.action, probs:r.probs}; } },
+    { id:"nova",   name:"Nova",   learner:true, desc:"learning now\nfrom every hand",
+      // She samples rather than taking the greedy action: REINFORCE is only
+      // unbiased on-policy, so exploring here is what makes the hand teachable.
+      act:(s,up,ace)=>{
+        const r = nova.act(s,up,ace);
+        novaHand.xs.push(r.x); novaHand.acts.push(r.action); novaHand.ps.push(r.probs);
+        return {action:r.action, probs:r.probs};
+      } },
     { id:"echo",   name:"Echo",   star:false, desc:"Copies the house\nhits below 17",
       act:(s)=>({action: s<17?1:0}) },
     { id:"stoic",  name:"Stoic",  star:false, desc:"Never takes\na card",
@@ -469,6 +488,9 @@
   ];
   /* ---------- Nova: the same architecture, still learning ---------- */
   let nova = new FlyLearner(7);
+  // Nova's decisions in the hand currently on the table, kept so the hand can
+  // teach her once the mantis settles it.
+  let novaHand = { xs:[], acts:[], ps:[] };
 
   const state = {};
   FLIES.forEach(f => state[f.id] = {cards:[], done:false, w:0, l:0, p:0, net:0});
@@ -574,6 +596,7 @@
     $("handcount").textContent = "hand " + handNo;
 
     dealerCards = [draw(), draw()];
+    novaHand = { xs:[], acts:[], ps:[] };
     FLIES.forEach(f => { state[f.id].cards = [draw(), draw()]; state[f.id].done = false;
       verdict(f.id, "", "v-idle"); });
 
@@ -624,8 +647,17 @@
       if (r > 0){ s.w++; verdict(f.id, "wins", "v-win"); }
       else if (r < 0){ s.l++; verdict(f.id, pt > 21 ? "bust" : "loses", "v-loss"); }
       else { s.p++; verdict(f.id, "push", "v-push"); }
+
+      // The hand Nova just played is experience like any other: one REINFORCE
+      // update, +1 dopaminergic / -1 octopaminergic / 0 neutral.
+      if (f.learner && novaHand.xs.length){
+        nova.learnFromHand(novaHand.xs, novaHand.acts, novaHand.ps, r);
+        tableTaught++;
+        pulseNursery(r);
+      }
     }
     renderBank();
+    updateNursery();
 
     busy = false;
     $("deal").disabled = false;
@@ -712,7 +744,19 @@
     document.documentElement.style.setProperty("--nova", col);
   }
 
-  let novaTraining = true, novaDone = false;
+  let novaTraining = true, novaDone = false, tableTaught = 0;
+
+  /** Flash the neuromodulatory pulse the hand just delivered to Nova. */
+  let pulseTimer = null;
+  function pulseNursery(reward){
+    const el = $("nova-pulse");
+    const kind = reward > 0 ? "dopamine" : reward < 0 ? "octopamine" : "neutral";
+    const label = reward > 0 ? "+1 dopamine" : reward < 0 ? "-1 octopamine" : "0 neutral";
+    el.textContent = label;
+    el.className = "pulse show " + kind;
+    clearTimeout(pulseTimer);
+    pulseTimer = setTimeout(() => { el.className = "pulse " + kind; }, 2200);
+  }
 
   function updateNursery(){
     const s = nova.score(OPT, window.OPTIMAL_FREQ);
@@ -720,8 +764,9 @@
     $("nova-agree").textContent = (s.weighted * 100).toFixed(1) + "%";
     $("nova-reward").textContent = nova.hands > 500
       ? nova.recentMean().toFixed(3) : "—";
-    $("nova-state").textContent = novaDone ? "grown up"
-      : novaTraining ? "learning" : "paused";
+    $("nova-state").textContent = novaDone ? "at the table"
+      : novaTraining ? "learning fast" : "table only";
+    $("nova-table").firstChild.nodeValue = tableTaught.toLocaleString();
     setNovaGlow(s.weighted);
     drawPolicyGrid();
 
@@ -734,9 +779,10 @@
         `play on <span class="up">${(s.weighted * 100).toFixed(1)}%</span> of them, weighted by how ` +
         `often they come up. Vesper, fully trained, reaches 88.4%.`;
     } else {
-      note.innerHTML = `Done: ${nova.hands.toLocaleString()} hands, ` +
-        `<span class="up">${(s.weighted * 100).toFixed(1)}%</span> weighted agreement — the same ` +
-        `place Vesper's 200,000-hand training run landed, learned in front of you.`;
+      note.innerHTML = `Background training is done: ${nova.hands.toLocaleString()} hands at ` +
+        `<span class="up">${(s.weighted * 100).toFixed(1)}%</span> weighted agreement — where ` +
+        `Vesper's 200,000-hand run landed, learned in front of you. She keeps learning from every ` +
+        `hand dealt at this table.`;
     }
   }
 
@@ -757,11 +803,12 @@
     if (novaDone) return;
     novaTraining = !novaTraining;
     e.target.textContent = novaTraining ? "Pause" : "Resume";
+    // Pausing only stops the fast background loop; table hands still teach her.
     updateNursery();
   });
   $("nova-reset").addEventListener("click", () => {
     nova = new FlyLearner((Math.random() * 1e9) | 0);
-    novaDone = false; novaTraining = true;
+    novaDone = false; novaTraining = true; tableTaught = 0;
     $("nova-toggle").textContent = "Pause";
     updateNursery();
   });

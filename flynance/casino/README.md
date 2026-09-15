@@ -20,12 +20,30 @@ the other half. She starts from random He-normal weights and runs the full REINF
 loop live: return-to-go, a running-mean baseline, an entropy bonus, and Adam decaying
 from 5e-4 to 2e-5, exactly as `trainers.py` does it.
 
-She trains in time-boxed background chunks (8 ms per animation frame, so the table
-stays responsive) at roughly 5,000 hands per second, reaching ~88% weighted agreement
-with the exact optimum in about 200,000 hands — under a minute of watching. The
-nursery panel shows her hands lived, her agreement, her recent reward, and a 280-cell
-grid of every decision, lit where she matches optimal play. She also brightens as she
-learns: her colour interpolates from slate toward brass with her agreement score.
+She learns down two paths at once:
+
+- **Background training**, in time-boxed chunks (8 ms per animation frame, so the
+  table stays responsive) at roughly 5,000 hands per second. This is what carries
+  her to ~88% weighted agreement in about 200,000 hands — under a minute of
+  watching. Pause it any time.
+- **Hands at the table**, one gradient step each. Every hand she plays in front of
+  you is real experience: the nursery counter ticks, the neuromodulatory pulse
+  fires (+1 dopamine / −1 octopamine / 0 neutral), and her weights change. This
+  keeps working after background training finishes, and while it is paused.
+
+At the table she *samples* from her policy rather than taking the greedy action.
+That matters: REINFORCE's gradient estimate is only unbiased for on-policy actions,
+so a greedily-played hand would not be valid experience to learn from. Exploring is
+what makes the hand teachable.
+
+The nursery panel shows her hands lived, her agreement, her recent reward, how many
+hands this table has taught her, and a 280-cell grid of every decision, lit where she
+matches optimal play. She also brightens as she learns: her colour interpolates from
+slate toward brass with her agreement score.
+
+One honest caveat on scale: a table hand is one update against the ~200,000 it takes
+to learn this game, so you will not see the grid change from dealing a few. The
+counter and the pulse show the mechanism; the background loop supplies the volume.
 
 Nothing about this is a simulation of learning — it is the learning, in
 `learner.js`, a direct port of the Python trainer.

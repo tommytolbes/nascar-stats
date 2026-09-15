@@ -181,6 +181,18 @@
   };
 
   /**
+   * Sample an action, and return everything needed to learn from it later.
+   *
+   * Used for hands played at the table: she explores there exactly as she does
+   * in training, which is what makes those hands usable as experience.
+   */
+  Learner.prototype.act = function (playerSum, upcard, ace) {
+    const x = [playerSum / 21, upcard / 10, ace];
+    const probs = this.forward(x);
+    return { action: this.rng() < probs[1] ? 1 : 0, probs: probs, x: x };
+  };
+
+  /**
    * Play one hand against the house, learning from it.
    *
    * Returns the terminal reward: +1 dopaminergic, -1 octopaminergic, 0 neutral.
@@ -231,8 +243,26 @@
       reward = player > dealer ? 1 : player < dealer ? -1 : 0;
     }
 
-    // REINFORCE. gamma = 1 and the only non-zero reward is terminal, so every
-    // decision in the hand shares the same return.
+    return this.learnFromHand(xs, acts, ps, reward);
+  };
+
+  /**
+   * Apply one REINFORCE update from a hand's experience.
+   *
+   * Split out from playAndLearn so a hand played *elsewhere* -- at the casino
+   * table, dealt by the page rather than by this object's own simulation -- can
+   * teach her exactly as a background hand does. The caller records each
+   * decision's input, sampled action and probabilities, then hands the whole
+   * hand over with its terminal reward.
+   *
+   * The actions must have been **sampled** from this policy, not taken greedily:
+   * REINFORCE's gradient estimate is only unbiased for on-policy actions.
+   */
+  Learner.prototype.learnFromHand = function (xs, acts, ps, reward) {
+    if (!xs.length) return reward;
+
+    // gamma = 1 and the only non-zero reward is terminal, so every decision in
+    // the hand shares the same return.
     const meanReturn = this.baselineCount ? this.baselineSum / this.baselineCount : 0;
     const advantage = reward - meanReturn;
     this.baselineSum += reward * xs.length;
