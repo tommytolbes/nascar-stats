@@ -330,7 +330,8 @@
     Vesper runs the real 4,010-parameter network &mdash; a 3&nbsp;&rarr;&nbsp;64&nbsp;&rarr;&nbsp;56&nbsp;&rarr;&nbsp;2
     ReLU policy trained by REINFORCE over 200,000 hands &mdash; evaluated in your browser, weight for weight.
     Over 10,000 hands it averages &minus;0.049 per hand against an exact optimum of &minus;0.0466.
-    Dizzy is the same architecture trained by the original specification&rsquo;s broken loop, which collapsed to always-hit.
+    Dizzy is the same architecture trained by the original specification&rsquo;s broken loop, which collapsed to always-hit
+    &mdash; held to one house rule here, that he stands on 21 rather than hitting a hand he cannot improve.
   </footer>
 </div>
 
@@ -377,8 +378,12 @@
       act:(s)=>({action: s<17?1:0}) },
     { id:"stoic",  name:"Stoic",  star:false, desc:"Never takes\na card",
       act:()=>({action:0}) },
-    { id:"dizzy",  name:"Dizzy",  star:false, desc:"The broken loop\nalways hits",
-      act:()=>({action:1}) },
+    // House rule: Dizzy stands on 21. The broken loop's policy would hit it --
+    // a guaranteed bust, since the smallest card still takes him to 22 -- and
+    // watching a fly hit a dealt 21 is a spectacle nobody needs. He is otherwise
+    // exactly that policy.
+    { id:"dizzy",  name:"Dizzy",  star:false, desc:"The broken loop\nhits below 21",
+      act:(s)=>({action: s >= 21 ? 0 : 1}) },
   ];
   const state = {};
   FLIES.forEach(f => state[f.id] = {cards:[], done:false, w:0, l:0, p:0, net:0});

@@ -23,10 +23,16 @@ as it happens.
 | **Vesper** | the trained 4,010-weight network |
 | **Echo** | mimics the house — hits below 17 |
 | **Stoic** | never takes a card |
-| **Dizzy** | the *original specification's* broken training loop, which collapsed to always-hit |
+| **Dizzy** | the *original specification's* broken training loop, which collapsed to always-hit — subject to one house rule: he stands on 21 |
 
 Dizzy is the experiment's headline finding sitting at the table: same architecture,
-trained by the loop the spec actually shipped, busting every single hand. Watch the
+trained by the loop the spec actually shipped, busting every single hand.
+
+The one departure from that policy: Dizzy stands on 21. The real always-hit policy
+hits there too — a certain bust, since even an ace takes 21 to 22 — and the table
+declines to stage it. Every other total he hits, so the collapse is intact and he
+still busts essentially every hand; he just no longer does it in the single most
+absurd way available. Watch the
 chip tally for a few rounds and the cost of the bug is obvious without reading a
 single number in the report.
 
