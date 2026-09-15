@@ -12,6 +12,37 @@ through the same 3 → 64 → 56 → 2 (Vesper) or 12 → 64 → 56 → 2 (Iris)
 that `trainers.train_reinforce` produced — the same matrix multiplies, the same
 softmax, evaluated in JavaScript.
 
+## Nova: learning in the browser
+
+Vesper and Iris arrive pre-trained and frozen — at the table they only run forward
+passes, and will make the identical decision in the identical spot forever. Nova is
+the other half. She starts from random He-normal weights and runs the full REINFORCE
+loop live: return-to-go, a running-mean baseline, an entropy bonus, and Adam decaying
+from 5e-4 to 2e-5, exactly as `trainers.py` does it.
+
+She trains in time-boxed background chunks (8 ms per animation frame, so the table
+stays responsive) at roughly 5,000 hands per second, reaching ~88% weighted agreement
+with the exact optimum in about 200,000 hands — under a minute of watching. The
+nursery panel shows her hands lived, her agreement, her recent reward, and a 280-cell
+grid of every decision, lit where she matches optimal play. She also brightens as she
+learns: her colour interpolates from slate toward brass with her agreement score.
+
+Nothing about this is a simulation of learning — it is the learning, in
+`learner.js`, a direct port of the Python trainer.
+
+### Verifying that she actually learns
+
+A ported *training loop* can be wrong in ways a forward-pass check never catches — a
+sign error in the advantage, a missing ReLU mask, a biased baseline — and the symptom
+is just "learns slightly worse", invisible without a reference:
+
+```bash
+node flynance/casino/verify_learner.mjs 200000
+```
+
+It trains one in Node and asserts she reaches the same policy quality the Python
+trainer reaches. Current result: **88.5% weighted agreement**, against Python's 88.4%.
+
 ## The encoding experiment, seated at the table
 
 Vesper and Iris differ in exactly one thing: how they are shown the dealer's card.
@@ -38,6 +69,7 @@ as it happens.
 |---|---|
 | **Vesper** | the trained 4,010-weight network, spec encoding (`upcard / 10`) |
 | **Iris** | the same mushroom body with a one-hot dealer upcard — 4,586 weights |
+| **Nova** | the same architecture with the *training loop still attached* — learns in your browser |
 | **Echo** | mimics the house — hits below 17 |
 | **Stoic** | never takes a card |
 | **Dizzy** | the *original specification's* broken training loop, which collapsed to always-hit — subject to one house rule: he stands on 21 |
