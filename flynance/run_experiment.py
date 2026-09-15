@@ -53,7 +53,7 @@ def _section(title: str) -> str:
 
 
 def run_encoding_ablation(episodes: int, seed: int, eval_hands: int,
-                          solution: opt.OptimalSolution) -> tuple[str, dict]:
+                          solution: opt.OptimalSolution) -> tuple[str, dict, object]:
     """Ask whether the spec's 3-scalar sensory encoding is the binding constraint.
 
     The spec maps a dealer ace to 0.1 -- numerically the weakest upcard, while
@@ -98,7 +98,7 @@ def run_encoding_ablation(episodes: int, seed: int, eval_hands: int,
         "weighted_alignment": float(align["weighted"]),
         "raw_alignment": float(align["raw"]),
     }
-    return "\n".join(lines), metrics
+    return "\n".join(lines), metrics, brain
 
 
 def run(
@@ -107,13 +107,15 @@ def run(
     eval_hands: int,
     verbose: bool = True,
     ablation: bool = False,
-) -> tuple[str, dict, "FlyBlackjackBrain"]:
+) -> tuple[str, dict, object, object | None]:
     """Execute the full experiment.
 
-    Returns the report text, the metrics dict, and the trained REINFORCE brain
-    so the caller can save it (see ``--save-model``) and replay it later.
+    Returns the report text, the metrics dict, the trained REINFORCE brain, and
+    the one-hot ablation brain (``None`` unless ``ablation`` was requested), so
+    the caller can save them (see ``--save-model``) and replay them later.
     """
     started = time.time()
+    metrics_holder: dict = {}
     lines: list[str] = []
     metrics: dict = {"config": {
         "episodes": episodes,
@@ -218,9 +220,10 @@ def run(
     # ---- 5. Optional encoding ablation ------------------------------------
     if ablation:
         emit(_section("5. ABLATION: is the spec's sensory encoding the ceiling?"))
-        ablation_text, ablation_metrics = run_encoding_ablation(
+        ablation_text, ablation_metrics, ablation_brain = run_encoding_ablation(
             episodes=episodes, seed=seed, eval_hands=eval_hands, solution=solution
         )
+        metrics_holder["ablation_brain"] = ablation_brain
         emit(ablation_text)
         emit(f"\nFor comparison, the spec encoding reached "
              f"{fly_alignment['weighted']:.1%} weighted alignment.")
@@ -257,7 +260,7 @@ def run(
     metrics["all_criteria_passed"] = all(passed for _, passed in checks)
 
     emit(f"\nCompleted in {time.time() - started:.1f}s")
-    return "\n".join(lines), metrics, fly_brain
+    return "\n".join(lines), metrics, fly_brain, metrics_holder.get("ablation_brain")
 
 
 def main() -> int:
@@ -279,7 +282,7 @@ def main() -> int:
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
-    report, metrics, fly_brain = run(
+    report, metrics, fly_brain, ablation_brain = run(
         episodes=args.episodes,
         seed=args.seed,
         eval_hands=args.eval_hands,
@@ -296,6 +299,11 @@ def main() -> int:
         args.save_model.parent.mkdir(parents=True, exist_ok=True)
         fly_brain.save(args.save_model)
         print(f"Trained brain saved to {args.save_model}")
+        if ablation_brain is not None:
+            onehot_path = args.save_model.with_name(
+                args.save_model.stem + "_onehot" + args.save_model.suffix)
+            ablation_brain.save(onehot_path)
+            print(f"One-hot ablation brain saved to {onehot_path}")
     metrics_path = args.output.parent / f"metrics_seed{args.seed}.json"
 
     if args.check_reproducible and metrics_path.exists():

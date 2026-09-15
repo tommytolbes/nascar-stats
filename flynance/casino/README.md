@@ -6,10 +6,26 @@ Open `index.html` in any browser. No build step, no server, no network calls.
 
 ## What is actually running
 
-Vesper's decisions are **not scripted and not a lookup table**. All 4,010 weights
-are in `brain-data.js`, and every decision is a live forward pass through the same
-3 → 64 → 56 → 2 ReLU policy that `trainers.train_reinforce` produced — the same
-matrix multiplies, the same softmax, evaluated in JavaScript.
+Vesper's and Iris's decisions are **not scripted and not a lookup table**. Both
+sets of weights are in `brain-data.js`, and every decision is a live forward pass
+through the same 3 → 64 → 56 → 2 (Vesper) or 12 → 64 → 56 → 2 (Iris) ReLU policy
+that `trainers.train_reinforce` produced — the same matrix multiplies, the same
+softmax, evaluated in JavaScript.
+
+## The encoding experiment, seated at the table
+
+Vesper and Iris differ in exactly one thing: how they are shown the dealer's card.
+Vesper gets the spec's `upcard / 10`, which puts an ace at `0.1` — numerically the
+weakest value on the axis, while strategically it is the dealer's strongest card.
+Iris gets a one-hot vector, so each upcard is free to mean whatever it means.
+
+| | Weights | EV / hand | Wrong cells | Weighted agreement |
+|---|---|---|---|---|
+| Vesper (spec encoding) | 4,010 | −0.049 | 21 / 280 | 88.4% |
+| Iris (one-hot upcard) | 4,586 | −0.046 | 17 / 280 | 92.4% |
+
+Watch the dealer-ace and dealer-7-through-10 hands in particular: that is where
+Vesper stands on a hard 15 or 16 and Iris takes the card.
 
 The rail shows her real output: the softmax probabilities for STAND and HIT, the
 raw three-number input vector, and whether the decision matches the exact optimum
@@ -20,7 +36,8 @@ as it happens.
 
 | Fly | Policy |
 |---|---|
-| **Vesper** | the trained 4,010-weight network |
+| **Vesper** | the trained 4,010-weight network, spec encoding (`upcard / 10`) |
+| **Iris** | the same mushroom body with a one-hot dealer upcard — 4,586 weights |
 | **Echo** | mimics the house — hits below 17 |
 | **Stoic** | never takes a card |
 | **Dizzy** | the *original specification's* broken training loop, which collapsed to always-hit — subject to one house rule: he stands on 21 |
@@ -41,9 +58,16 @@ single number in the report.
 `brain-data.js` is generated, never hand-edited:
 
 ```bash
-python -m flynance.run_experiment --episodes 200000    # trains and saves the brain
-python -m flynance.export_web                          # writes brain-data.js
+# --ablation also trains and saves Iris's one-hot brain; without it only Vesper
+# is produced and export_web simply omits the one-hot weights.
+python -m flynance.run_experiment --episodes 200000 --ablation
+python -m flynance.export_web
 ```
+
+The `.npz` model files are deliberately not committed (they are regenerable, and
+the repo ignores binaries), so a fresh clone needs that training run before the
+export can be reproduced. `brain-data.js` itself *is* committed, so the page
+works immediately after cloning.
 
 ## Verifying the browser plays the real policy
 

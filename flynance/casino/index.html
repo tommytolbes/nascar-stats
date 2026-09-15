@@ -97,7 +97,7 @@
 
   /* ---------- seats ---------- */
   .seats{
-    display:grid;grid-template-columns:repeat(4,1fr);gap:clamp(8px,1.4vw,16px);
+    display:grid;grid-template-columns:repeat(5,1fr);gap:clamp(6px,1.1vw,13px);
   }
   .seat{
     display:flex;flex-direction:column;align-items:center;gap:7px;
@@ -119,6 +119,8 @@
     min-height:2.4em;
   }
   .seat.star .fly-desc{color:var(--brass)}
+  .seat.rival .fly-name{color:#8FD2DA}
+  .seat.rival .fly-desc{color:var(--ocean)}
 
   /* ---------- cards ---------- */
   .hand{display:flex;gap:3px;min-height:52px;align-items:center;justify-content:center;flex-wrap:wrap}
@@ -236,6 +238,9 @@
   @media (prefers-reduced-motion:reduce){
     *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
   }
+  @media (max-width:980px){
+    .seats{grid-template-columns:repeat(3,1fr);gap:12px}
+  }
   @media (max-width:720px){
     .rail{grid-template-columns:1fr}
     .seats{grid-template-columns:repeat(2,1fr);gap:14px}
@@ -247,11 +252,12 @@
 <div class="wrap">
   <header class="masthead">
     <div>
-      <p class="kicker">Agentic Flynance &middot; 4,010 synaptic weights</p>
+      <p class="kicker">Agentic Flynance &middot; two encodings, one mushroom body</p>
       <h1>The <em>Mantis</em> Room</h1>
     </div>
-    <p class="house-note">Four flies, one mantis, and a sea that does not care.
-      Vesper's decisions are computed live by the trained network &mdash; nothing here is scripted.</p>
+    <p class="house-note">Five flies, one mantis, and a sea that does not care. Vesper and
+      Iris are two trained networks differing only in how they are shown the dealer&rsquo;s card
+      &mdash; both computed live, nothing here is scripted.</p>
   </header>
 
   <div class="window">
@@ -302,7 +308,7 @@
 
   <section class="rail">
     <div>
-      <h2>Vesper&rsquo;s mushroom body &mdash; live output</h2>
+      <h2 id="readout-title">Live network output</h2>
       <div class="readout-state" id="readout-state">waiting for the first deal</div>
       <div class="bar-row">
         <span class="bar-label">STAND</span>
@@ -315,7 +321,8 @@
         <span class="bar-val" id="val-hit">&mdash;</span>
       </div>
       <p class="judgement" id="judgement">Each decision is scored against the exact optimal policy,
-        computed by dynamic programming over these rules.</p>
+        computed by dynamic programming over these rules. Vesper is wrong in 21 of the 280 decision
+        cells; Iris, who sees the upcard one-hot, in 17.</p>
     </div>
     <div>
       <h2>The table</h2>
@@ -330,6 +337,9 @@
     Vesper runs the real 4,010-parameter network &mdash; a 3&nbsp;&rarr;&nbsp;64&nbsp;&rarr;&nbsp;56&nbsp;&rarr;&nbsp;2
     ReLU policy trained by REINFORCE over 200,000 hands &mdash; evaluated in your browser, weight for weight.
     Over 10,000 hands it averages &minus;0.049 per hand against an exact optimum of &minus;0.0466.
+    Iris is the same mushroom body fed a one-hot dealer upcard instead of <code>upcard/10</code>, which
+    stops an ace reading as the weakest card on the axis: 4,586 weights, &minus;0.046 per hand, and
+    agreement with the optimum up from 88.4% to 92.4%.
     Dizzy is the same architecture trained by the original specification&rsquo;s broken loop, which collapsed to always-hit
     &mdash; held to one house rule here, that he stands on 21 rather than hitting a hand he cannot improve.
   </footer>
@@ -338,9 +348,9 @@
 <script>
 (() => {
   "use strict";
-  const W = window.FLY_WEIGHTS, OPT = window.OPTIMAL_POLICY;
+  const W = window.FLY_WEIGHTS, WOH = window.ONEHOT_WEIGHTS, OPT = window.OPTIMAL_POLICY;
 
-  /* ---------- the fly brain, weight for weight ---------- */
+  /* ---------- the fly brains, weight for weight ---------- */
   function dense(x, w, b, inN, outN){
     const out = new Float64Array(outN);
     for (let j = 0; j < outN; j++){
@@ -351,14 +361,28 @@
     return out;
   }
   const relu = v => v.map(z => z > 0 ? z : 0);
-  function flyPolicy(sum, up, ace){
-    const h1 = relu(dense([sum/21, up/10, ace], W.W1, W.b1, 3, 64));
-    const h2 = relu(dense(h1, W.W2, W.b2, 64, 56));
-    const z  = dense(h2, W.W3, W.b3, 56, 2);
+
+  function forward(weights, x, inN){
+    const h1 = relu(dense(x, weights.W1, weights.b1, inN, 64));
+    const h2 = relu(dense(h1, weights.W2, weights.b2, 64, 56));
+    const z  = dense(h2, weights.W3, weights.b3, 56, 2);
     const m = Math.max(z[0], z[1]);
     const e0 = Math.exp(z[0]-m), e1 = Math.exp(z[1]-m);
     return [e0/(e0+e1), e1/(e0+e1)];
   }
+
+  // Encodings, matching flynance/encoding.py exactly.
+  const specInput = (sum, up, ace) => [sum/21, up/10, ace];
+  const oneHotInput = (sum, up, ace) => {
+    const x = new Array(12).fill(0);
+    x[0] = sum/21;
+    if (up >= 1 && up <= 10) x[up] = 1;   // x[1] is the ace ... x[10] a ten
+    x[11] = ace;
+    return x;
+  };
+
+  const flyPolicy   = (s, up, ace) => forward(W,   specInput(s, up, ace), 3);
+  const onehotPolicy = (s, up, ace) => forward(WOH, oneHotInput(s, up, ace), 12);
 
   /* ---------- rules: infinite shoe, dealer stands on soft 17 ---------- */
   const DECK = [1,2,3,4,5,6,7,8,9,10,10,10,10];
@@ -372,8 +396,10 @@
 
   /* ---------- the players ---------- */
   const FLIES = [
-    { id:"vesper", name:"Vesper", star:true,  desc:"4,010 weights\nREINFORCE",
+    { id:"vesper", name:"Vesper", star:true,  net:true, desc:"4,010 weights\nupcard as one number",
       act:(s,up,ace)=>{ const p = flyPolicy(s,up,ace); return {action: p[1]>p[0]?1:0, probs:p}; } },
+    { id:"iris",   name:"Iris",   rival:true, net:true, desc:"4,586 weights\nupcard one-hot",
+      act:(s,up,ace)=>{ const p = onehotPolicy(s,up,ace); return {action: p[1]>p[0]?1:0, probs:p}; } },
     { id:"echo",   name:"Echo",   star:false, desc:"Copies the house\nhits below 17",
       act:(s)=>({action: s<17?1:0}) },
     { id:"stoic",  name:"Stoic",  star:false, desc:"Never takes\na card",
@@ -389,23 +415,23 @@
   FLIES.forEach(f => state[f.id] = {cards:[], done:false, w:0, l:0, p:0, net:0});
 
   /* ---------- seats ---------- */
-  const flySVG = (starred) => `
+  const flySVG = (starred, rival) => `
     <svg class="bug" width="42" height="34" viewBox="0 0 42 34" aria-hidden="true">
       <ellipse class="wing"  cx="15" cy="13" rx="11" ry="5.5"
-        fill="${starred ? 'rgba(240,177,131,.42)' : 'rgba(242,232,220,.26)'}"/>
+        fill="${starred ? 'rgba(240,177,131,.42)' : rival ? 'rgba(110,190,200,.36)' : 'rgba(242,232,220,.26)'}"/>
       <ellipse class="wing2" cx="27" cy="13" rx="11" ry="5.5"
-        fill="${starred ? 'rgba(240,177,131,.3)' : 'rgba(242,232,220,.18)'}"/>
-      <ellipse cx="21" cy="20" rx="7" ry="9" fill="${starred ? '#3C4448' : '#2C3438'}"/>
-      <ellipse cx="21" cy="11" rx="5" ry="4.4" fill="${starred ? '#4A5358' : '#394246'}"/>
-      <circle cx="17.6" cy="10" r="2.6" fill="${starred ? '#E8894A' : '#8A4A3C'}"/>
-      <circle cx="24.4" cy="10" r="2.6" fill="${starred ? '#E8894A' : '#8A4A3C'}"/>
-      <path d="M19 7 L17 3 M23 7 L25 3" stroke="${starred ? '#4A5358' : '#394246'}"
+        fill="${starred ? 'rgba(240,177,131,.3)' : rival ? 'rgba(110,190,200,.24)' : 'rgba(242,232,220,.18)'}"/>
+      <ellipse cx="21" cy="20" rx="7" ry="9" fill="${starred || rival ? '#3C4448' : '#2C3438'}"/>
+      <ellipse cx="21" cy="11" rx="5" ry="4.4" fill="${starred || rival ? '#4A5358' : '#394246'}"/>
+      <circle cx="17.6" cy="10" r="2.6" fill="${starred ? '#E8894A' : rival ? '#6EBEC8' : '#8A4A3C'}"/>
+      <circle cx="24.4" cy="10" r="2.6" fill="${starred ? '#E8894A' : rival ? '#6EBEC8' : '#8A4A3C'}"/>
+      <path d="M19 7 L17 3 M23 7 L25 3" stroke="${starred || rival ? '#4A5358' : '#394246'}"
         stroke-width="1.1" stroke-linecap="round"/>
     </svg>`;
 
   document.getElementById("seats").innerHTML = FLIES.map(f => `
-    <div class="seat ${f.star ? 'star' : ''}" id="seat-${f.id}">
-      ${flySVG(f.star)}
+    <div class="seat ${f.star ? 'star' : ''}${f.rival ? ' rival' : ''}" id="seat-${f.id}">
+      ${flySVG(f.star, f.rival)}
       <div class="fly-name">${f.name}</div>
       <div class="fly-desc">${f.desc.replace("\n","<br>")}</div>
       <div class="hand" id="hand-${f.id}"></div>
@@ -446,9 +472,13 @@
   renderBank();
 
   /* ---------- Vesper's telemetry ---------- */
-  function showReadout(sum, up, ace, probs, action){
+  function showReadout(fly, sum, up, ace, probs, action){
+    $("readout-title").textContent = `${fly.name} — ${fly.star ? "spec encoding" : "one-hot encoding"}`;
+    const input = fly.star
+      ? `[${(sum/21).toFixed(3)}, ${(up/10).toFixed(2)}, ${ace}]`
+      : `[${(sum/21).toFixed(3)}, one-hot ${rank(up)}, ${ace}]`;
     $("readout-state").textContent =
-      `player ${sum}${ace ? " (soft)" : ""} · dealer shows ${rank(up)} → input [${(sum/21).toFixed(3)}, ${(up/10).toFixed(2)}, ${ace}]`;
+      `player ${sum}${ace ? " (soft)" : ""} · dealer shows ${rank(up)} → input ${input}`;
     $("bar-stand").style.width = (probs[0]*100).toFixed(1) + "%";
     $("bar-hit").style.width   = (probs[1]*100).toFixed(1) + "%";
     $("val-stand").textContent = (probs[0]*100).toFixed(1) + "%";
@@ -457,14 +487,14 @@
     const best = OPT[`${sum}_${up}_${ace}`];
     const name = a => a === 1 ? "hit" : "stand";
     let msg;
+    const wrongCells = fly.star ? 21 : 17;
     if (best === undefined){
-      msg = `Chose to <b>${name(action)}</b>. This state sits outside the solved grid.`;
+      msg = `${fly.name} chose to <b>${name(action)}</b>. This state sits outside the solved grid.`;
     } else if (best === action){
-      msg = `Chose to <b>${name(action)}</b> — <span class="agree">matches optimal play</span>.`;
+      msg = `${fly.name} chose to <b>${name(action)}</b> — <span class="agree">matches optimal play</span>.`;
     } else {
-      msg = `Chose to <b>${name(action)}</b>, but the optimum is to <b>${name(best)}</b> — ` +
-            `<span class="disagree">one of the 21 cells it gets wrong</span>, and they cluster ` +
-            `against strong dealer upcards.`;
+      msg = `${fly.name} chose to <b>${name(action)}</b>, but the optimum is to <b>${name(best)}</b> — ` +
+            `<span class="disagree">one of the ${wrongCells} cells this encoding gets wrong</span>.`;
     }
     $("judgement").innerHTML = msg;
   }
@@ -499,7 +529,7 @@
         const t = total(s.cards);
         if (t.sum > 21){ verdict(f.id, "bust", "v-loss"); break; }
         const res = f.act(t.sum, up, t.soft ? 1 : 0);
-        if (f.star) showReadout(t.sum, up, t.soft ? 1 : 0, res.probs, res.action);
+        if (f.net) showReadout(f, t.sum, up, t.soft ? 1 : 0, res.probs, res.action);
         verdict(f.id, res.action === 1 ? "hits" : "stands", "v-act");
         await wait(pace());
         if (res.action === 0) break;
