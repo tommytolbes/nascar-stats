@@ -1,0 +1,180 @@
+"""Export the trained brain and the exact optimum for the browser.
+
+    python -m flynance.export_web
+
+Writes ``flynance/casino/brain-data.js``, which the casino page loads. The point
+of this script is that the committed .js file is *reproducible*: it is generated
+from ``flynance/results/fly_brain.npz`` rather than hand-maintained, so the page
+can never silently drift away from the network it claims to be running.
+
+Weights are rounded to 6 decimals to keep the file small. That rounding is
+harmless: ``flynance/casino/verify_browser_brain.mjs`` replays every one of the
+280 decision states through the JavaScript implementation and compares against
+this one, and the rounding has never changed a single action.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import numpy as np
+
+from flynance import optimal as opt
+
+PARAM_KEYS = ("W1", "b1", "W2", "b2", "W3", "b3")
+DEFAULT_MODEL = Path(__file__).resolve().parent / "results" / "fly_brain.npz"
+DEFAULT_ONEHOT = Path(__file__).resolve().parent / "results" / "fly_brain_onehot.npz"
+DEFAULT_FULL = Path(__file__).resolve().parent / "results" / "fly_brain_full.npz"
+DEFAULT_OUT = Path(__file__).resolve().parent / "casino" / "brain-data.js"
+
+
+def write_reference(model_path: Path, ref_path: Path, rich: bool = False,
+                    full: bool = False) -> Path:
+    """Dump Python's action probabilities for every state, for the JS cross-check."""
+    from flynance.brain import FlyBlackjackBrain
+    from flynance.encoding import (FULL_INPUT_SIZE, RICH_INPUT_SIZE,
+                                   preprocess_state, preprocess_state_full_onehot,
+                                   preprocess_state_rich)
+
+    if full:
+        class FullOneHotBrain(FlyBlackjackBrain):
+            LAYER_SIZES = (FULL_INPUT_SIZE, 64, 56, 2)
+        brain = FullOneHotBrain.load(model_path)
+        preprocess_state = preprocess_state_full_onehot  # noqa: F811 - deliberate swap
+    elif rich:
+        class WideSensoryBrain(FlyBlackjackBrain):
+            LAYER_SIZES = (RICH_INPUT_SIZE, 64, 56, 2)
+        brain = WideSensoryBrain.load(model_path)
+        preprocess_state = preprocess_state_rich  # noqa: F811 - deliberate swap
+    else:
+        brain = FlyBlackjackBrain.load(model_path)
+    reference = {}
+    for player_sum in range(4, 22):
+        for upcard in range(1, 11):
+            for ace in (0, 1):
+                if ace and player_sum < 12:
+                    continue  # a usable ace implies a total of at least 12
+                probs = brain.policy(preprocess_state((player_sum, upcard, ace))[None, :])[0]
+                reference[f"{player_sum}_{upcard}_{ace}"] = [
+                    round(float(probs[0]), 6), round(float(probs[1]), 6)
+                ]
+    ref_path.parent.mkdir(parents=True, exist_ok=True)
+    ref_path.write_text(json.dumps(reference, separators=(",", ":")))
+    print(f"Wrote {ref_path} ({len(reference)} reference states)")
+    return ref_path
+
+
+def _load_flat(model_path: Path, decimals: int) -> tuple[dict, int]:
+    """Read a saved brain and flatten its parameters row-major for JavaScript."""
+    archive = np.load(model_path)
+    # brain.save() namespaces parameters under 'param_' alongside Adam state.
+    weights = {key: archive[f"param_{key}"] for key in PARAM_KEYS}
+    flat = {k: [round(float(x), decimals) for x in v.ravel()] for k, v in weights.items()}
+    return flat, sum(v.size for v in weights.values())
+
+
+def export(model_path: Path, out_path: Path, decimals: int = 6,
+           onehot_path: Path | None = None, full_path: Path | None = None) -> Path:
+    """Write the weights and the optimal policy as a browser-loadable JS file.
+
+    When ``onehot_path`` points at a saved ablation brain, its weights are
+    exported alongside, so the casino page can seat the one-hot fly next to the
+    spec-encoded one and let the encoding difference be watched rather than
+    read off a table.
+    """
+    if not model_path.exists():
+        raise SystemExit(
+            f"No trained brain at {model_path}.\n"
+            "Train one first:  python -m flynance.run_experiment --episodes 200000"
+        )
+
+    flat, total = _load_flat(model_path, decimals)
+
+    onehot_flat = onehot_total = None
+    if onehot_path is not None and onehot_path.exists():
+        onehot_flat, onehot_total = _load_flat(onehot_path, decimals)
+
+    full_flat = full_total = None
+    if full_path is not None and full_path.exists():
+        full_flat, full_total = _load_flat(full_path, decimals)
+
+    solution = opt.solve()
+    policy = {f"{s}_{u}_{a}": int(act) for (s, u, a), act in solution.policy.items()}
+    # Visit frequencies make the browser's live agreement score directly
+    # comparable to the weighted alignment the report quotes.
+    freq = {f"{s}_{u}_{a}": round(float(f), 8)
+            for (s, u, a), f in solution.state_frequency.items()}
+
+    parts = [
+        "// Generated by flynance/export_web.py -- do not edit by hand.\n",
+        f"// Spec-encoded fly: {total:,} weights from {model_path.name}.\n",
+        "// Verified against the Python implementation by "
+        "casino/verify_browser_brain.mjs.\n",
+        "window.FLY_WEIGHTS = " + json.dumps(flat, separators=(",", ":")) + ";\n",
+    ]
+    if onehot_flat is not None:
+        parts += [
+            f"// One-hot-encoded fly (ablation): {onehot_total:,} weights from "
+            f"{onehot_path.name}.\n",
+            "// Input layout: [0] sum/21, [1..10] one-hot upcard (index == value), "
+            "[11] usable ace.\n",
+            "window.ONEHOT_WEIGHTS = " + json.dumps(onehot_flat, separators=(",", ":")) + ";\n",
+        ]
+    if full_flat is not None:
+        parts += [
+            f"// Fully one-hot fly: {full_total:,} weights from {full_path.name}.\n",
+            "// Input layout: [0:18] one-hot player sum 4..21, [18:28] one-hot upcard\n"
+            "// (index 18 == ace), [28] usable ace.\n",
+            "window.FULL_WEIGHTS = " + json.dumps(full_flat, separators=(",", ":")) + ";\n",
+        ]
+    parts += [
+        "// Exact optimal hit/stand policy from dynamic programming (optimal.py).\n",
+        "window.OPTIMAL_POLICY = " + json.dumps(policy, separators=(",", ":")) + ";\n",
+        "// How often optimal play actually visits each state (sums to 1).\n",
+        "window.OPTIMAL_FREQ = " + json.dumps(freq, separators=(",", ":")) + ";\n",
+        f"window.OPTIMAL_EV = {solution.expected_value:.6f};\n",
+    ]
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("".join(parts))
+    extra = f", {onehot_total:,} one-hot weights" if onehot_flat else ""
+    extra += f", {full_total:,} full-one-hot weights" if full_flat else ""
+    print(f"Wrote {out_path} ({out_path.stat().st_size:,} bytes): "
+          f"{total:,} weights{extra}, {len(policy)} optimal decisions")
+    return out_path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
+    parser.add_argument("--onehot-model", type=Path, default=DEFAULT_ONEHOT,
+                        help="saved one-hot ablation brain; exported when present")
+    parser.add_argument("--full-model", type=Path, default=DEFAULT_FULL,
+                        help="saved fully-one-hot brain; exported when present")
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--decimals", type=int, default=6)
+    parser.add_argument("--reference", type=Path, default=None,
+                        help="also dump Python action probabilities for "
+                             "verify_browser_brain.mjs to check against")
+    args = parser.parse_args()
+    export(args.model, args.out, args.decimals, args.onehot_model, args.full_model)
+    if args.reference:
+        write_reference(args.model, args.reference)
+        if args.onehot_model and args.onehot_model.exists():
+            write_reference(args.onehot_model,
+                            args.reference.with_name(
+                                args.reference.stem + "_onehot" + args.reference.suffix),
+                            rich=True)
+        if args.full_model and args.full_model.exists():
+            write_reference(args.full_model,
+                            args.reference.with_name(
+                                args.reference.stem + "_full" + args.reference.suffix),
+                            full=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

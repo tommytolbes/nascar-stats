@@ -1,0 +1,164 @@
+AGENTIC FLYNANCE - BLACKJACK FLY-BRAIN EXPERIMENT
+episodes=200000  seed=42  eval_hands=10000
+
+==============================================================================
+1. EXACT OPTIMAL POLICY (dynamic programming)
+==============================================================================
+
+Exact expected value of optimal hit/stand play: -0.046556
+Decision states solved: 280
+
+==============================================================================
+2. TRAINING
+==============================================================================
+
+Training spec-faithful baseline (200000 episodes)...
+  parameters: 4010
+  stand-rate on hittable states (4-16): 0.0000  [always-hit]
+
+Training corrected REINFORCE agent (200000 episodes, lr=0.0005 -> 2e-05, entropy=0.01)...
+  parameters: 4010
+  stand-rate on hittable states (4-16): 0.1611
+
+==============================================================================
+3. EXPECTED VALUE OVER 10,000 HANDS (common random numbers)
+==============================================================================
+
+policy                     EV/hand  +/- 95% CI              95% CI   win%   loss%  push%  hands
+-------------------------  -------  ----------  ------------------  -----  ------  -----  -----
+DP optimal (ceiling)       -0.0324      0.0186  [-0.0510, -0.0138]  43.41   46.65   9.94  10000
+reinforce (fly brain)      -0.0489      0.0186  [-0.0675, -0.0303]  42.92   47.81   9.27  10000
+dealer_mimic (hit < 17)    -0.0621      0.0185  [-0.0806, -0.0436]  41.47   47.68  10.85  10000
+always_stand               -0.1742      0.0188  [-0.1930, -0.1554]  38.61   56.03   5.36  10000
+spec_baseline (fly brain)  -1.0000      0.0000  [-1.0000, -1.0000]   0.00  100.00   0.00  10000
+
+==============================================================================
+4. DECISION MATRIX vs EXACT OPTIMUM
+==============================================================================
+
+Fly brain (REINFORCE) - hard/soft totals
+========================================
+
+Hard totals (no usable ace)
+total |   A   2   3   4   5   6   7   8   9  10
+------+----------------------------------------
+    4 |   H   H   H   H   H   H   H   H   H   H
+    5 |   H   H   H   H   H   H   H   H   H   H
+    6 |   H   H   H   H   H   H   H   H   H   H
+    7 |   H   H   H   H   H   H   H   H   H   H
+    8 |   H   H   H   H   H   H   H   H   H   H
+    9 |   H   H   H   H   H   H   H   H   H   H
+   10 |   H   H   H   H   H   H   H   H   H   H
+   11 |   H   H   H   H   H   H   H   H   H   H
+   12 |   H   H   H  h*  h*  h*   H   H   H   H
+   13 |   H  h*   S   S   S   S   H   H   H   H
+   14 |   H   S   S   S   S   S  s*   H   H   H
+   15 |  s*   S   S   S   S   S  s*  s*  s*   H
+   16 |  s*   S   S   S   S   S  s*  s*  s*  s*
+   17 |   S   S   S   S   S   S   S   S   S   S
+   18 |   S   S   S   S   S   S   S   S   S   S
+   19 |   S   S   S   S   S   S   S   S   S   S
+   20 |   S   S   S   S   S   S   S   S   S   S
+   21 |   S   S   S   S   S   S   S   S   S   S
+
+Soft totals (usable ace)
+total |   A   2   3   4   5   6   7   8   9  10
+------+----------------------------------------
+   12 |   H   H   H   H   H   H   H   H   H   H
+   13 |   H   H   H   H   H   H   H   H   H   H
+   14 |   H   H   H   H   H   H   H   H   H   H
+   15 |   H   H   H   H   H   H   H   H   H   H
+   16 |   H   H   H   H   H   H   H   H   H   H
+   17 |   H   H   H   H  s*  s*  s*  s*   H   H
+   18 |  s*   S   S   S   S   S   S   S  s*  s*
+   19 |   S   S   S   S   S   S   S   S   S   S
+   20 |   S   S   S   S   S   S   S   S   S   S
+   21 |   S   S   S   S   S   S   S   S   S   S
+
+Legend: H = hit, S = stand; columns are the dealer upcard (A = ace).
+        lowercase + '*' marks a cell that disagrees with the reference.
+Disagreements: 21 / 280 cells (7.5%)
+Exact DP optimum - hard/soft totals
+===================================
+
+Hard totals (no usable ace)
+total |   A   2   3   4   5   6   7   8   9  10
+------+----------------------------------------
+    4 |   H   H   H   H   H   H   H   H   H   H
+    5 |   H   H   H   H   H   H   H   H   H   H
+    6 |   H   H   H   H   H   H   H   H   H   H
+    7 |   H   H   H   H   H   H   H   H   H   H
+    8 |   H   H   H   H   H   H   H   H   H   H
+    9 |   H   H   H   H   H   H   H   H   H   H
+   10 |   H   H   H   H   H   H   H   H   H   H
+   11 |   H   H   H   H   H   H   H   H   H   H
+   12 |   H   H   H   S   S   S   H   H   H   H
+   13 |   H   S   S   S   S   S   H   H   H   H
+   14 |   H   S   S   S   S   S   H   H   H   H
+   15 |   H   S   S   S   S   S   H   H   H   H
+   16 |   H   S   S   S   S   S   H   H   H   H
+   17 |   S   S   S   S   S   S   S   S   S   S
+   18 |   S   S   S   S   S   S   S   S   S   S
+   19 |   S   S   S   S   S   S   S   S   S   S
+   20 |   S   S   S   S   S   S   S   S   S   S
+   21 |   S   S   S   S   S   S   S   S   S   S
+
+Soft totals (usable ace)
+total |   A   2   3   4   5   6   7   8   9  10
+------+----------------------------------------
+   12 |   H   H   H   H   H   H   H   H   H   H
+   13 |   H   H   H   H   H   H   H   H   H   H
+   14 |   H   H   H   H   H   H   H   H   H   H
+   15 |   H   H   H   H   H   H   H   H   H   H
+   16 |   H   H   H   H   H   H   H   H   H   H
+   17 |   H   H   H   H   H   H   H   H   H   H
+   18 |   H   S   S   S   S   S   S   S   H   H
+   19 |   S   S   S   S   S   S   S   S   S   S
+   20 |   S   S   S   S   S   S   S   S   S   S
+   21 |   S   S   S   S   S   S   S   S   S   S
+
+Legend: H = hit, S = stand; columns are the dealer upcard (A = ace).
+Alignment with DP optimum
+=========================
+Raw agreement:       92.50%  (259/280 states)
+Weighted agreement:  88.36%  (states weighted by visit frequency under optimal play)
+Disagreements:      21
+
+Top 10 most costly disagreements (frequency x EV cost):
+player  dealer  ace  agent  optimal     freq  EV cost  freq*cost
+------  ------  ---  -----  -------  -------  -------  ---------
+    15       A   no      S        H  0.00638   0.1549   0.000989
+    14       7   no      S        H  0.00610   0.1541   0.000940
+    16       A   no      S        H  0.00657   0.1274   0.000837
+    15       7   no      S        H  0.00629   0.1056   0.000664
+    15       8   no      S        H  0.00629   0.0937   0.000589
+    15       9   no      S        H  0.00638   0.0716   0.000457
+    16       7   no      S        H  0.00647   0.0606   0.000392
+    16       8   no      S        H  0.00647   0.0521   0.000337
+    17       8  yes      S        H  0.00090   0.3090   0.000278
+    16       9   no      S        H  0.00657   0.0338   0.000222
+... and 11 more
+
+spec_baseline alignment for comparison: raw=60.7%  weighted=47.1%
+
+==============================================================================
+5. ABLATION: is the spec's sensory encoding the ceiling?
+==============================================================================
+
+Parameters: 4586 (vs 4010 for the spec encoding)
+EV over 10,000 hands: -0.0478 [-0.0664, -0.0292]
+Weighted alignment with the optimum: 92.4% (raw 93.9%)
+
+For comparison, the spec encoding reached 88.4% weighted alignment.
+
+==============================================================================
+6. SUCCESS CRITERIA
+==============================================================================
+
+  [PASS] S1  brain has exactly 4,010 parameters
+  [PASS] S4  spec_baseline collapses to a constant action (stand-rate > 0.9 or < 0.1)
+  [PASS] S5a reinforce beats always_stand (non-overlapping 95% CI)
+  [PASS] S5b reinforce beats spec_baseline (non-overlapping 95% CI)
+  [PASS] S6  weighted alignment with DP optimum >= 85%
+
+Completed in 393.8s

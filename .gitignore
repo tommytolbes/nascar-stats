@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.db
+
+# flynance: trained model checkpoints (regenerate with run_experiment.py)
+flynance/results/*.npz
